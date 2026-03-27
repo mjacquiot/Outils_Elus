@@ -3,6 +3,9 @@
  * Version Finale (Abonnements, Votes, Droits, Tesseract, Supabase)
  */
 
+// --- DEBUG TRACER ---
+console.log("=== APP.JS STARTING ===");
+
 // --- CONFIG SUPABASE ---
 const supabaseUrl = 'https://cwppjhzjpbucyiwtncmt.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN3cHBqaHpqcGJ1Y3lpd3RuY210Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MTQ5NDQsImV4cCI6MjA5MDE5MDk0NH0.pe-JWUtpPs_sfI1OUrej7m3Fu2Km3QzB1Rh8qmHhd5w';
@@ -106,10 +109,22 @@ const Permissions = {
 
 // --- RENDER ENGINE ---
 function render() {
-  const app = document.getElementById('app');
-  if (state.currentView === 'login') app.innerHTML = renderLogin();
-  else if (state.currentView === 'public_login') app.innerHTML = renderPublicLogin();
-  else app.innerHTML = renderAppLayout(getContentForView());
+  console.log("=== RENDER CALLED ===");
+  try {
+      const app = document.getElementById('app');
+      if (!app) {
+          console.error("DOM element #app missing");
+          return;
+      }
+      console.log("App element present: ", !!app);
+      if (state.currentView === 'login') app.innerHTML = renderLogin();
+      else if (state.currentView === 'public_login') app.innerHTML = renderPublicLogin();
+      else app.innerHTML = renderAppLayout(getContentForView());
+      console.log("=== RENDER FINISHED ===");
+  } catch(e) {
+      console.error("=== EXPLOSION IN RENDER ===", e);
+      document.body.innerHTML = "<div style='padding:2rem;color:red;background:white;'><h2>Erreur fatale dans render()</h2><pre>" + e.stack + "</pre></div>";
+  }
 }
 
 function getContentForView() {
@@ -757,8 +772,26 @@ window.submitPublicVote = (subjectId, optionIndex) => {
     alert("Vérification échouée.");
   }
 };
-document.addEventListener('DOMContentLoaded', () => { setTimeout(render, 300); });
+// Lancement du rendu initial garanti
+try {
+  console.log("Tentative de rendu initial...");
+  render();
+} catch (e) {
+  document.body.innerHTML = "<div style='padding:2rem;background:white;color:red;'><h2>Erreur d'initialisation de app.js</h2><p>" + e.message + "</p></div>";
+}
+
+document.addEventListener('DOMContentLoaded', () => { 
+  console.log("DOM LOADED FIRED, scheduling render");
+  setTimeout(render, 300); 
+});
 // Failsafe if DOMContentLoaded already fired:
+console.log("Current document.readyState: ", document.readyState);
 if (document.readyState === 'interactive' || document.readyState === 'complete') {
+  console.log("Failsafe: scheduling render immediately");
   setTimeout(render, 300);
 }
+console.log("=== APP.JS FULLY LOADED WITHOUT SYNTAX ERROR ===");
+window.onerror = function(msg, url, lineNo, columnNo, error) {
+  document.body.innerHTML = "<div style='padding:2rem;background:white;color:red;'><h2>Erreur Critique Globale</h2><p>" + msg + " (Ligne: " + lineNo + ")</p></div>";
+  return false;
+};
