@@ -37,9 +37,10 @@
     <script src="https://unpkg.com/tesseract.js@v4.1.1/dist/tesseract.min.js"></script>
     <script src="app.js"></script>
     
-    <!-- Service Worker Registration -->
+    <!-- Service Worker Registration (Désactivé pour usage local) -->
     <script>
-        if ('serviceWorker' in navigator) {
+        /*
+        if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('sw.js').then(registration => {
                     console.log('SW enregistré avec succès: ', registration.scope);
@@ -48,6 +49,7 @@
                 });
             });
         }
+        */
     </script>
 </body>
 </html>
