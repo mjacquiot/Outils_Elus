@@ -20,6 +20,19 @@ const ROLES = { ADMIN: 'admin', MAIRE: 'maire', ADJOINT: 'adjoint', DELEGUE: 'de
 const MONTH_NAMES = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sept", "Oct", "Nov", "Déc"];
 const APP_DATE = new Date("2026-03-23T16:00:00");
 
+// --- SANITIZE HTML (XSS PROTECTION) ---
+const sanitizeHTML = (str) => {
+  if (typeof str !== 'string') return str;
+  return str.replace(/[&<>'"]/g, tag => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    }[tag] || tag)
+  );
+};
+
 // --- STATE ---
 let state = {
   user: null, // {id, username, email, role, subs: {themes:[], subjects:[]}, attachedThemes: []}
@@ -250,7 +263,7 @@ function renderDashboard() {
     <div class="card-grid">
       ${themes.map(t => {
     const subsCount = state.subjects.filter(s => s.themeId === t.id && Permissions.canSeeSubject(s, state.user)).length;
-    return `<div class="card" onclick="openTheme(${t.id})" style="display:flex; flex-direction:column; justify-content:space-between; cursor:pointer;"><div style="display:flex; justify-content:space-between; align-items:start;"><h3 style="margin-bottom:0.2rem;">${t.title}</h3></div><p class="card-desc" style="flex:1;">${t.desc}</p><div style="margin-top:1rem; display:flex; justify-content:space-between; align-items:center;"><span style="font-size:0.75rem; color:var(--text-muted); background:#f1f5f9; padding:0.2rem 0.5rem; border-radius:4px;">${subsCount} dossier(s)</span></div></div>`;
+    return `<div class="card" onclick="openTheme(${t.id})" style="display:flex; flex-direction:column; justify-content:space-between; cursor:pointer;"><div style="display:flex; justify-content:space-between; align-items:start;"><h3 style="margin-bottom:0.2rem;">${sanitizeHTML(t.title)}</h3></div><p class="card-desc" style="flex:1;">${sanitizeHTML(t.desc)}</p><div style="margin-top:1rem; display:flex; justify-content:space-between; align-items:center;"><span style="font-size:0.75rem; color:var(--text-muted); background:#f1f5f9; padding:0.2rem 0.5rem; border-radius:4px;">${subsCount} dossier(s)</span></div></div>`;
   }).join('')}
     </div>
   `;
@@ -263,7 +276,7 @@ function renderThemeView() {
 
   return `
     <div class="view-header" style="display:flex; justify-content:space-between; align-items:center;">
-      <div style="display:flex; align-items:center; gap:1rem;"><button class="btn btn-icon" onclick="navigate('dashboard')"><span class="material-icons-round">arrow_back</span></button><h2>${t.title}</h2></div>
+      <div style="display:flex; align-items:center; gap:1rem;"><button class="btn btn-icon" onclick="navigate('dashboard')"><span class="material-icons-round">arrow_back</span></button><h2>${sanitizeHTML(t.title)}</h2></div>
       <div style="display:flex; gap:0.5rem;">
         <button class="btn btn-outline" onclick="navigate('history')" style="color:#64748b; border-color:#cbd5e1;"><span class="material-icons-round">history</span> Historique</button>
         ${canManage ? `<button class="btn btn-primary" onclick="promptCreateSubject(${t.id})"><span class="material-icons-round">add</span> Nouveau Dossier</button>` : ''}
@@ -276,10 +289,10 @@ function renderThemeView() {
           <div class="card" style="padding:1.5rem; display:flex; justify-content:space-between; align-items:center; border:1px solid #e2e8f0; cursor:pointer;" onclick="openSubject(${s.id})">
             <div style="flex:1;">
                <h3 style="margin:0 0 0.5rem 0; display:flex; align-items:center; gap:0.5rem;">
-                 ${s.title} 
+                 ${sanitizeHTML(s.title)} 
                  ${s.isConfidential ? '<span class="material-icons-round" style="color:#ef4444; font-size:1rem;" title="Confidentiel">lock</span>' : ''}
                </h3>
-               <p class="card-desc" style="margin:0;">${s.desc}</p>
+               <p class="card-desc" style="margin:0;">${sanitizeHTML(s.desc)}</p>
             </div>
             ${canManage ? `<button class="btn btn-icon" onclick="deleteSubject(event, ${s.id})" style="color:#ef4444;"><span class="material-icons-round">delete</span></button>` : ''}
             <span class="material-icons-round" style="color:var(--text-muted); margin-left:1rem;">chevron_right</span>
@@ -335,7 +348,7 @@ function renderSubjectView() {
 
   return `
     <div class="view-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
-      <div style="display:flex; align-items:center; gap:1rem;"><button class="btn btn-icon" onclick="openTheme(${s.themeId})"><span class="material-icons-round">arrow_back</span></button><div><h2 style="display:flex; align-items:center; gap:0.5rem;">${s.title}</h2></div></div>
+      <div style="display:flex; align-items:center; gap:1rem;"><button class="btn btn-icon" onclick="openTheme(${s.themeId})"><span class="material-icons-round">arrow_back</span></button><div><h2 style="display:flex; align-items:center; gap:0.5rem;">${sanitizeHTML(s.title)}</h2></div></div>
       <div style="display:flex; gap:0.5rem;">
         ${canManage && !s.vote ? `<button class="btn btn-outline" style="border-color:var(--primary); color:var(--primary);" onclick="promptCreateVote(${s.id})"><span class="material-icons-round">how_to_vote</span> Créer Sondage/Vote</button>` : ''}
         ${canAddToAgenda && !s.councilDate ? `<button class="btn btn-primary" onclick="addToCouncil(${s.id})">Ordre du Jour Conseil</button>` : ''}
@@ -363,7 +376,7 @@ function renderSubjectView() {
                 <div class="card" style="padding:1rem; border:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; gap:0.8rem; border-radius:8px;">
                      <div onclick="openDoc(${d.id})" style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; flex:1; overflow:hidden;">
                         <span class="material-icons-round" style="color:#ef4444; font-size:2rem;">description</span>
-                        <div style="font-size:0.85rem; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${d.title}">${d.title}</div>
+                        <div style="font-size:0.85rem; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${sanitizeHTML(d.title)}">${sanitizeHTML(d.title)}</div>
                      </div>
                      ${canManage ? `<button class="btn btn-icon" onclick="deleteDocument(${s.id}, ${d.id})" style="color:#ef4444; padding:0;"><span class="material-icons-round" style="font-size:1.2rem;">delete</span></button>` : ''}
                 </div>
@@ -377,7 +390,7 @@ function renderSubjectView() {
       <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; display:flex; flex-direction:column; height: calc(100vh - 200px); min-height:500px;">
         <div style="padding:1rem; border-bottom:1px solid #e2e8f0; background:#f8fafc; border-radius:12px 12px 0 0;"><h3 style="font-size:1rem; margin:0;"><span class="material-icons-round" style="font-size:1.2rem; color:var(--primary); vertical-align:middle;">forum</span> Fil D'information</h3></div>
         <div id="thread-chat-subj" style="flex:1; overflow-y:auto; padding:1.5rem 1rem; display:flex; flex-direction:column; gap:1rem;">
-          ${msgs.map(m => `<div style="display:flex; flex-direction:column; gap:0.2rem; ${m.sender === state.user.username ? 'align-items:flex-end;' : 'align-items:flex-start;'}"><span style="font-size:0.7rem; color:#94a3b8; margin:0 0.5rem;">${m.sender}</span><div style="background:${m.sender === state.user.username ? 'var(--primary)' : '#f1f5f9'}; color:${m.sender === state.user.username ? 'white' : 'var(--text-main)'}; padding:0.6rem 1rem; border-radius:16px; font-size:0.85rem; max-width:85%;">${m.text}</div></div>`).join('') || '<div style="text-align:center; color:#94a3b8; margin-top:2rem;">Historique vide.</div>'}
+          ${msgs.map(m => `<div style="display:flex; flex-direction:column; gap:0.2rem; ${m.sender === state.user.username ? 'align-items:flex-end;' : 'align-items:flex-start;'}"><span style="font-size:0.7rem; color:#94a3b8; margin:0 0.5rem;">${sanitizeHTML(m.sender)}</span><div style="background:${m.sender === state.user.username ? 'var(--primary)' : '#f1f5f9'}; color:${m.sender === state.user.username ? 'white' : 'var(--text-main)'}; padding:0.6rem 1rem; border-radius:16px; font-size:0.85rem; max-width:85%;">${sanitizeHTML(m.text)}</div></div>`).join('') || '<div style="text-align:center; color:#94a3b8; margin-top:2rem;">Historique vide.</div>'}
         </div>
         <div style="padding:1rem; border-top:1px solid #e2e8f0; display:flex; gap:0.5rem;">
           <input id="smsg" style="flex:1; border:1px solid #cbd5e1; border-radius:24px; padding:0.6rem 1rem; font-size:0.85rem;" placeholder="Partager une note...">
@@ -431,10 +444,10 @@ function renderDocViewer() {
   return `<div style="position:fixed; inset:0; background:rgba(15, 23, 42, 0.85); z-index:2000; display:flex; justify-content:center; align-items:center; padding:2rem;">
      <div style="background:white; width:100%; max-width:900px; height:85vh; border-radius:12px; display:flex; flex-direction:column; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
        <div style="display:flex; justify-content:space-between; align-items:center; padding:1.5rem; border-bottom:1px solid #e2e8f0; background:#f8fafc; border-radius:12px 12px 0 0;">
-         <h3 style="margin:0; display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round" style="color:#ef4444;">description</span> ${d.title}</h3>
+         <h3 style="margin:0; display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round" style="color:#ef4444;">description</span> ${sanitizeHTML(d.title)}</h3>
          <button class="btn btn-icon" onclick="closeDoc()"><span class="material-icons-round">close</span></button>
        </div>
-       <div style="flex:1; padding:2.5rem; overflow-y:auto; line-height:1.7; color:#334155; font-size:0.95rem; white-space:pre-wrap; font-family:Georgia, serif;">${d.content}</div>
+       <div style="flex:1; padding:2.5rem; overflow-y:auto; line-height:1.7; color:#334155; font-size:0.95rem; white-space:pre-wrap; font-family:Georgia, serif;">${sanitizeHTML(d.content)}</div>
      </div>
   </div>`;
 }
@@ -459,7 +472,7 @@ function renderCouncilManagement() {
            ${ag.map(s => `
             <li style="display:flex; justify-content:space-between; align-items:flex-start; background:#f8fafc; padding:0.8rem; border-radius:8px; border:1px solid #e2e8f0;">
                 <div style="flex:1;">
-                   <b style="line-height:1.4;">${s.title}</b>
+                   <b style="line-height:1.4;">${sanitizeHTML(s.title)}</b>
                    ${s.isManual ? '<span style="font-size:0.75rem; color:#8b5cf6; background:#ede9fe; padding:0.1rem 0.4rem; border-radius:4px; margin-left:0.5rem; vertical-align:middle;">Point Libre</span>' : '<span style="font-size:0.75rem; color:#0ea5e9; background:#e0f2fe; padding:0.1rem 0.4rem; border-radius:4px; margin-left:0.5rem; vertical-align:middle;">Dossier Commission</span>'}
                 </div>
                 ${canManageAg ? `
@@ -547,7 +560,7 @@ window.handleLogin = async () => {
 
     if (error) {
       console.error(error);
-      fallbackLogin(userV, email);
+      alert("Authentification échouée : " + error.message);
     } else {
       // Real Supabase succes
       const mockU = state.users.find(u => u.email === data.user.email) || { id: data.user.id, username: data.user.email.split('@')[0], email: data.user.email, role: ROLES.ELU, attachedThemes: [], subs: {} };
@@ -557,21 +570,9 @@ window.handleLogin = async () => {
     }
   } catch (e) {
     console.error(e);
-    fallbackLogin(userV, email);
+    alert("Authentification échouée / Impossible de contacter le serveur.");
   }
 };
-
-function fallbackLogin(userV, email) {
-  const mockU = state.users.find(u => u.username === userV || u.email === email);
-  if (mockU) {
-    console.log("Mock fallback login succes.");
-    state.user = mockU;
-    state.currentView = 'dashboard';
-    render();
-  } else {
-    alert("Identifiants incorrects ou connexion Supabase échouée.");
-  }
-}
 
 window.handlePublicLogin = () => {
   const nom = document.getElementById('pub-nom').value;
