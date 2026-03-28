@@ -54,23 +54,61 @@ let state = {
   users: [] // Géré par l'admin via Supabase Auth normalement
 };
 
-// --- INITIALISATION MOCK DATA ---
-function initMockData() {
-  state.themes = [
-    { id: 1, title: 'Enfance & Jeunesse', desc: 'Gestion des crèches et écoles.', isArchived: false, docs: [] },
-    { id: 2, title: 'Urbanisme & Travaux', desc: 'Aménagements, voirie, PLU.', isArchived: false, docs: [] }
-  ];
-  state.users = [
-    { id: '1', username: 'admin', email: 'admin@admin.com', role: ROLES.ADMIN, attachedThemes: [], subs: { themes: [], subjects: [] } },
-    { id: '2', username: 'maire_dupond', email: 'maire@test.com', role: ROLES.MAIRE, attachedThemes: [], subs: { themes: [], subjects: [] } },
-    { id: '3', username: 'adjoint_enfance', email: 'adjoint@test.com', role: ROLES.ADJOINT, attachedThemes: [1], subs: { themes: [], subjects: [] } },
-    { id: '4', username: 'elu_simple', email: 'elu@test.com', role: ROLES.ELU, attachedThemes: [], subs: { themes: [], subjects: [] } },
-    { id: '5', username: 'tech_urb', email: 'tech@test.com', role: ROLES.TECHNICIEN, attachedThemes: [], subs: { themes: [], subjects: [] } }
-  ];
-}
-initMockData();
+// --- INITIALIZATION & SYNC ---
+async function syncFromSupabase() {
+  if (!supabaseClient) return;
+  try {
+    const [
+      { data: profiles },
+      { data: themes },
+      { data: subjects },
+      { data: councils },
+      { data: messages },
+      { data: documents }
+    ] = await Promise.all([
+      supabaseClient.from('profiles').select('*'),
+      supabaseClient.from('themes').select('*').eq('is_archived', false),
+      supabaseClient.from('subjects').select('*'),
+      supabaseClient.from('councils').select('*'),
+      supabaseClient.from('messages').select('*'),
+      supabaseClient.from('documents').select('*')
+    ]);
 
-// --- LOG HISTORIQUE (Audit) ---
+    state.users = profiles || [];
+    state.themes = (themes || []).map(t => ({ id: t.id, title: t.title, desc: t.description, isArchived: t.is_archived }));
+    
+    // Attaching docs to subjects
+    const allSubjects = (subjects || []).map(s => ({
+       id: s.id,
+       themeId: s.theme_id,
+       title: s.title,
+       desc: s.description,
+       isConfidential: s.is_confidential,
+       councilDate: s.council_date,
+       vote: s.vote,
+       docs: []
+    }));
+    const allDocs = (documents || []).map(d => ({ id: d.id, subject_id: d.subject_id, title: d.title, content: d.content }));
+    
+    allSubjects.forEach(s => {
+      s.docs = allDocs.filter(d => d.subject_id === s.id);
+    });
+    state.subjects = allSubjects;
+    
+    state.councils = (councils || []).map(c => ({ id: c.id, date: c.date_seance, agenda: c.agenda || [] }));
+    state.messages = (messages || []).map(m => ({ id: m.id, type: m.type, targetId: m.target_id, sender: m.sender, text: m.text }));
+    
+    // Set current user profile accurately if logged in
+    if (state.user && state.user.id) {
+       const p = state.users.find(u => u.id === state.user.id);
+       if (p) state.user = { id: p.id, email: p.email, username: p.username, role: p.role, attachedThemes: p.attached_themes || [] };
+    }
+  } catch (err) {
+    console.error("Erreur de synchro Supabase:", err);
+  }
+}
+
+// L'historique devient temporaire/client-side pour l'instant
 function logHistory(themeId, action, description) {
   state.historyLogs.push({
     id: Date.now(),
@@ -562,9 +600,9 @@ window.handleLogin = async () => {
       console.error(error);
       alert("Authentification échouée : " + error.message);
     } else {
-      // Real Supabase succes
-      const mockU = state.users.find(u => u.email === data.user.email) || { id: data.user.id, username: data.user.email.split('@')[0], email: data.user.email, role: ROLES.ELU, attachedThemes: [], subs: {} };
-      state.user = mockU;
+      // Real Supabase succes. Setup minimal user, then sync accurately captures role
+      state.user = { id: data.user.id, email: data.user.email, username: data.user.email.split('@')[0], role: ROLES.ELU, attachedThemes: [] };
+      await syncFromSupabase();
       state.currentView = 'dashboard';
       render();
     }
@@ -574,7 +612,7 @@ window.handleLogin = async () => {
   }
 };
 
-window.handlePublicLogin = () => {
+window.handlePublicLogin = async () => {
   const nom = document.getElementById('pub-nom').value;
   const pre = document.getElementById('pub-prenom').value;
   const capt = document.getElementById('pub-captcha').value;
@@ -582,6 +620,7 @@ window.handlePublicLogin = () => {
   if (!nom || !pre || capt !== 'Q7T2X') return alert('Informations ou captcha incorrects.');
 
   state.user = null; // Public user
+  await syncFromSupabase();
   state.currentView = 'dashboard';
   render();
 };
@@ -599,96 +638,81 @@ window.openDoc = (id) => { state.activeDocId = id; render(); };
 window.closeDoc = () => { state.activeDocId = null; render(); };
 
 // --- CRÉATION / GESTION DES DONNÉES ---
-window.promptCreateTheme = () => {
+window.promptCreateTheme = async () => {
   const title = prompt("Titre de la commission/thème :");
   if (!title) return;
   const desc = prompt("Description :");
-  const nid = Date.now();
-  state.themes.push({ id: nid, title, desc: desc || '', isArchived: false, docs: [] });
-  logHistory(nid, 'CREATION_THEME', `Thème créé : ${title}`);
+  await supabaseClient.from('themes').insert({ title, description: desc || '' });
+  logHistory(null, 'CREATION_THEME', `Thème créé : ${title}`);
+  await syncFromSupabase();
   render();
 };
 
-window.promptCreateSubject = (themeId) => {
+window.promptCreateSubject = async (themeId) => {
   const title = prompt("Titre du nouveau dossier :");
   if (!title) return;
   const desc = prompt("Description :");
   const isConf = confirm("Ce dossier est-il confidentiel (invisible aux techniciens) ?");
-  const nid = Date.now();
-  state.subjects.push({ id: nid, themeId, title, desc: desc || '', isConfidential: isConf, councilDate: null, docs: [], vote: null });
+  await supabaseClient.from('subjects').insert({ theme_id: themeId, title, description: desc || '', is_confidential: isConf });
   logHistory(themeId, 'AJOUT_SUJET', `Sujet créé : ${title}`);
+  await syncFromSupabase();
   render();
 };
 
-window.deleteSubject = (e, sid) => {
+window.deleteSubject = async (e, sid) => {
   e.stopPropagation();
   if (confirm("Supprimer ce sujet définitivement ?")) {
     const s = state.subjects.find(x => x.id === sid);
-    state.subjects = state.subjects.filter(x => x.id !== sid);
+    await supabaseClient.from('subjects').delete().eq('id', sid);
     logHistory(s.themeId, 'SUPPRESSION_SUJET', `Sujet détruit : ${s.title}`);
+    await syncFromSupabase();
     render();
   }
 }
 
-window.promptCreateUser = async () => {
-  const email = prompt("Email du nouvel utilisateur :");
-  if (!email) return;
-  const pass = prompt("Mot de passe temporaire :");
-  const roleChoice = prompt("Rôle (maire, adjoint, delegue, elu, technicien) :", "elu");
-
-  if (!Object.values(ROLES).includes(roleChoice)) return alert("Rôle invalide.");
-
-  // Dans une version avec auth admin Supabase:
-  // supabase.auth.admin.createUser({...})
-
-  // Pour le prototype local:
-  state.users.push({
-    id: Date.now().toString(),
-    username: email.split('@')[0],
-    email: email,
-    role: roleChoice,
-    attachedThemes: [],
-    subs: { themes: [], subjects: [] }
-  });
-  alert("Utilisateur " + email + " créé.");
-  render();
+window.promptCreateUser = () => {
+  alert("Pour ajouter un utilisateur, demandez-lui de s'inscrire sur la page de connexion, ou ajoutez-le manuellement depuis la console Supabase (Authentication > Add User). Son profil sera créé automatiquement !");
 }
 
-window.addUserTheme = (uid) => {
+window.addUserTheme = async (uid) => {
   const sel = document.getElementById('sel-thm-' + uid);
   if (sel && sel.value) {
     const u = state.users.find(x => x.id === uid);
-    u.attachedThemes.push(parseInt(sel.value));
+    const newThemes = [...(u.attached_themes || []), parseInt(sel.value)];
+    await supabaseClient.from('profiles').update({ attached_themes: newThemes }).eq('id', uid);
+    await syncFromSupabase();
     render();
   }
 }
 
-window.removeUserTheme = (uid, tid) => {
+window.removeUserTheme = async (uid, tid) => {
   const u = state.users.find(x => x.id === uid);
-  u.attachedThemes = u.attachedThemes.filter(x => x !== tid);
+  const newThemes = (u.attached_themes || []).filter(x => x !== tid);
+  await supabaseClient.from('profiles').update({ attached_themes: newThemes }).eq('id', uid);
+  await syncFromSupabase();
   render();
 }
 
 window.deleteUser = (uid) => {
-  if (confirm("Supprimer cet utilisateur définitivement ? (Attention: Cette action est irréversible dans la base de données)")) {
-    state.users = state.users.filter(x => x.id !== uid);
-    render();
-  }
+  alert("Pour des raisons de sécurité, la suppression complète d'un utilisateur doit être effectuée via le tableau de bord Supabase (Menu Authentication).");
 }
 
-window.changeUserRole = (uid, newRole) => {
+window.changeUserRole = async (uid, newRole) => {
   const u = state.users.find(x => x.id === uid);
   if(u) {
-    u.role = newRole;
-    if(![ROLES.ADJOINT, ROLES.DELEGUE].includes(newRole)) u.attachedThemes = [];
+    let updateData = { role: newRole };
+    if(![ROLES.ADJOINT, ROLES.DELEGUE].includes(newRole)) updateData.attached_themes = [];
+    await supabaseClient.from('profiles').update(updateData).eq('id', uid);
+    await syncFromSupabase();
     render();
   }
 }
 
-window.addCouncilDate = () => {
+window.addCouncilDate = async () => {
   const val = document.getElementById('new-council-dt').value;
   if (val) {
-    state.councils.push({ id: Date.now(), date: val, agenda: [] });
+    await supabaseClient.from('councils').insert({ date_seance: val, agenda: [] });
+    await syncFromSupabase();
     state.councils.sort((a, b) => new Date(a.date) - new Date(b.date));
     render();
   } else {
@@ -696,63 +720,69 @@ window.addCouncilDate = () => {
   }
 };
 
-window.addToCouncil = (sid) => {
+window.addToCouncil = async (sid) => {
   const nextC = state.councils.find(c => (new Date(c.date) - APP_DATE) / (1000 * 60 * 60 * 24) >= 0);
   if (!nextC) return alert("Aucun conseil programmé disponible.");
   if (confirm(`Inscrire à l'ordre du jour du ${new Date(nextC.date).toLocaleDateString()} ?`)) {
-    const s = state.subjects.find(x => x.id === sid);
-    s.councilDate = nextC.date;
-    if (!nextC.agenda) nextC.agenda = [];
-    nextC.agenda.push(sid);
+    await supabaseClient.from('subjects').update({ council_date: nextC.date }).eq('id', sid);
+    const newAgenda = [...(nextC.agenda || []), sid];
+    await supabaseClient.from('councils').update({ agenda: newAgenda }).eq('id', nextC.id);
+    await syncFromSupabase();
     render();
   }
 };
 
-window.promptAddCouncilItem = (cid) => {
+window.promptAddCouncilItem = async (cid) => {
   const title = prompt("Titre du point libre à l'ordre du jour :");
   if (title) {
     const c = state.councils.find(x => x.id === cid);
-    c.agenda.push({ id: 'm_' + Date.now(), title: title, isManual: true });
+    const newAgenda = [...(c.agenda || []), { id: 'm_' + Date.now(), title: title, isManual: true }];
+    await supabaseClient.from('councils').update({ agenda: newAgenda }).eq('id', cid);
+    await syncFromSupabase();
     render();
   }
 };
 
-window.editCouncilItem = (cid, itemId) => {
+window.editCouncilItem = async (cid, itemId) => {
   const c = state.councils.find(x => x.id === cid);
   const it = c.agenda.find(x => x.id === itemId);
   if (it) {
     const n = prompt("Modifier le titre du point libre :", it.title);
     if (n) {
-      it.title = n;
+      const newAgenda = c.agenda.map(x => (x.id === itemId ? { ...x, title: n } : x));
+      await supabaseClient.from('councils').update({ agenda: newAgenda }).eq('id', cid);
+      await syncFromSupabase();
       render();
     }
   }
 };
 
-window.removeCouncilItem = (cid, itemIdRaw) => {
+window.removeCouncilItem = async (cid, itemIdRaw) => {
   if (confirm("Retirer ce point de l'ordre du jour ?")) {
     const c = state.councils.find(x => x.id === cid);
     const parsedId = String(itemIdRaw).startsWith('m_') ? String(itemIdRaw) : Number(itemIdRaw);
     
-    c.agenda = c.agenda.filter(x => {
+    const newAgenda = c.agenda.filter(x => {
         if (typeof x === 'object') return x.id !== parsedId;
         return x !== parsedId;
     });
     
+    await supabaseClient.from('councils').update({ agenda: newAgenda }).eq('id', cid);
     if (typeof parsedId === 'number') {
-        const s = state.subjects.find(sub => sub.id === parsedId);
-        if (s) s.councilDate = null;
+        await supabaseClient.from('subjects').update({ council_date: null }).eq('id', parsedId);
     }
+    await syncFromSupabase();
     render();
   }
 };
 
-window.sendMsg = (type, targetId, inputId) => {
+window.sendMsg = async (type, targetId, inputId) => {
   const i = document.getElementById(inputId);
   const text = i.value;
   if (!text) return;
-  state.messages.push({ id: Date.now(), type, targetId, sender: state.user.username, text, date: new Date().toISOString() });
+  await supabaseClient.from('messages').insert({ type, target_id: targetId, sender: state.user.username, text });
   i.value = '';
+  await syncFromSupabase();
   render();
   setTimeout(() => {
     const c = document.getElementById('thread-chat-subj');
@@ -819,7 +849,7 @@ window.handleDocUpload = async (e, sid) => {
         throw new Error("Format non supporté : " + ext);
       }
 
-      s.docs.push({ id: Date.now() + Math.random(), title: "[Importé] " + f.name, content: textContent || "Aucun texte identifié." });
+      await supabaseClient.from('documents').insert({ subject_id: sid, title: "[Importé] " + f.name, content: textContent || "Aucun texte identifié." });
       logHistory(s.themeId, 'AJOUT_DOCUMENT', `Document importé et transcrit : ${f.name}`);
     } catch (err) {
       console.error(err);
@@ -827,21 +857,20 @@ window.handleDocUpload = async (e, sid) => {
     }
   }
   loader.style.display = 'none';
+  await syncFromSupabase();
   render();
 };
 
-window.deleteDocument = (sid, did) => {
+window.deleteDocument = async (sid, did) => {
   if (confirm("Supprimer ce document définitivement ?")) {
-    const s = state.subjects.find(x => x.id === sid);
-    const doc = s.docs.find(x => x.id === did);
-    s.docs = s.docs.filter(x => x.id !== did);
-    logHistory(s.themeId, 'SUPPRESSION_DOC', `Document supprimé : ${doc.title}`);
+    await supabaseClient.from('documents').delete().eq('id', did);
+    await syncFromSupabase();
     render();
   }
 }
 
 // --- VOTES ---
-window.promptCreateVote = (sid) => {
+window.promptCreateVote = async (sid) => {
   const q = prompt("Question du vote (ex: Êtes-vous pour ce projet ?) :");
   if (!q) return;
   const rawOpts = prompt("Réponses possibles, séparées par une virgule (ex: Oui, Non, Peut-être) :");
@@ -850,32 +879,41 @@ window.promptCreateVote = (sid) => {
   if (opts.length < 2) return alert("Il faut au minimum 2 options.");
 
   const target = confirm("Ce vote est-il à destination des ÉLUS en interne ?\n(OK = Élus en interne, Annuler = Vote Public Citoyen)");
-  let d = new Date(APP_DATE);
-  d.setDate(d.getDate() + 3);
 
-  const s = state.subjects.find(x => x.id === sid);
-  s.vote = { target: target ? 'elu' : 'public', question: q, options: opts, counts: new Array(opts.length).fill(0), voters: [], endDate: d.toISOString() };
-  logHistory(s.themeId, 'CREATION_VOTE', `Sondage/Vote créé. Cible: ${target ? 'Elu' : 'Citoyen'}`);
+  const newVote = { target: target ? 'elu' : 'public', question: q, options: opts, counts: new Array(opts.length).fill(0), voters: [] };
+  await supabaseClient.from('subjects').update({ vote: newVote }).eq('id', sid);
+  await syncFromSupabase();
   render();
 };
 
-window.submitEluVote = (subjectId, optionIndex) => {
+window.submitEluVote = async (subjectId, optionIndex) => {
   if (!state.user) return;
   if (confirm("Confirmer ce vote ? (définitif)")) {
     const s = state.subjects.find(x => x.id === subjectId);
-    s.vote.counts[optionIndex]++;
-    s.vote.voters.push(state.user.id);
+    let updatedVote = JSON.parse(JSON.stringify(s.vote));
+    updatedVote.counts[optionIndex]++;
+    updatedVote.voters.push(state.user.id);
+    await supabaseClient.from('subjects').update({ vote: updatedVote }).eq('id', subjectId);
+    await syncFromSupabase();
     render();
   }
 };
 
-window.submitPublicVote = (subjectId, optionIndex) => {
+window.submitPublicVote = async (subjectId, optionIndex) => {
   const answer = prompt("Vérification : Combien font 3 + 4 ?\nVeuillez taper le chiffre :");
   if (answer && answer.trim() === "7") {
     const s = state.subjects.find(x => x.id === subjectId);
-    s.vote.counts[optionIndex]++;
-    state.publicVotedStatus[subjectId] = true;
-    alert("Votre vote a bien été pris en compte. Merci de votre participation !");
+    let updatedVote = JSON.parse(JSON.stringify(s.vote));
+    updatedVote.counts[optionIndex]++;
+    
+    const { error } = await supabaseClient.from('subjects').update({ vote: updatedVote }).eq('id', subjectId);
+    if(error) {
+       alert("Échec de l'enregistrement (seuls les membres authentifiés peuvent modifier les compteurs avec la RLS actuelle).");
+    } else {
+       state.publicVotedStatus[subjectId] = true;
+       alert("Votre vote a bien été pris en compte. Merci de votre participation !");
+    }
+    await syncFromSupabase();
     render();
   } else {
     alert("Vérification échouée.");
