@@ -9,9 +9,9 @@ console.log("=== APP.JS STARTING ===");
 // --- CONFIG SUPABASE ---
 const supabaseUrl = 'https://cwppjhzjpbucyiwtncmt.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN3cHBqaHpqcGJ1Y3lpd3RuY210Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MTQ5NDQsImV4cCI6MjA5MDE5MDk0NH0.pe-JWUtpPs_sfI1OUrej7m3Fu2Km3QzB1Rh8qmHhd5w';
-let supabase;
+let supabaseClient;
 try {
-  supabase = window.supabase ? window.supabase.createClient(supabaseUrl, supabaseKey) : null;
+  supabaseClient = window.supabase ? window.supabase.createClient(supabaseUrl, supabaseKey) : null;
 } catch (e) {
   console.error("Supabase init error:", e);
 }
@@ -515,7 +515,7 @@ window.handleLogin = async () => {
   try {
     console.log("Supabase Auth Attempt with:", email);
     // Supabase sign in logic
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
       email: email,
       password: passV,
     });
@@ -561,7 +561,7 @@ window.handlePublicLogin = () => {
 };
 
 window.logout = async () => {
-  await supabase.auth.signOut();
+  if (supabaseClient) await supabaseClient.auth.signOut();
   state.user = null;
   state.currentView = 'login';
   render();
