@@ -1,0 +1,57 @@
+===========================================================
+AIDE-MÉMOIRE GIT - AUTOMATISATION ARCHIVAGE
+===========================================================
+
+1. SE DÉPLACER DANS LE TERMINAL (Navigation)
+-----------------------------------------------------------
+ls              : Voir les dossiers/fichiers ici
+cd NomDossier   : Entrer dans un dossier
+cd ..           : Revenir en arrière (dossier parent)
+explorer .      : Ouvrir le dossier actuel dans Windows
+
+
+2. LE CYCLE QUOTIDIEN (Sauvegarder sur GitHub)
+-----------------------------------------------------------
+Étape 1 : Vérifier ce qui a changé
+   git status
+
+Étape 2 : Préparer les fichiers (le point "." signifie "TOUT")
+   git add .
+
+Étape 3 : Créer la sauvegarde locale avec un message
+   git commit -m "Description de ma modification"
+
+Étape 4 : Envoyer sur GitHub
+   git push
+
+
+3. RÉCUPÉRER SON TRAVAIL (Mise à jour)
+-----------------------------------------------------------
+git pull        : Télécharge les derniers changements du site 
+                  vers ton ordinateur.
+
+
+4. CONFIGURATION MULTI-COMPTE (Identité)
+-----------------------------------------------------------
+Dans chaque nouveau dossier de projet, définis qui tu es :
+
+Pour le compte Perso :
+   git config user.name "Ton Nom"
+   git config user.email "mr.jacquiot.eps@gmail.com"
+
+Pour le compte Pro (quand il sera prêt) :
+   git config user.name "Ton Nom"
+   git config user.email "ton_autre_email@exemple.com"
+
+
+5. CLONER UN NOUVEAU PROJET
+-----------------------------------------------------------
+Utilise toujours l'alias défini dans ton fichier SSH config :
+
+Compte Perso :
+   git clone git@github.com-perso:mjacquiot/NOM_DU_REPO.git
+
+Compte Pro :
+   git clone git@github.com-pro:AUTRE_NOM/NOM_DU_REPO.git
+
+===========================================================
