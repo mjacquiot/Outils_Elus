@@ -75,6 +75,7 @@ async function syncFromSupabase() {
     ]);
 
     state.users = profiles || [];
+    console.log("Profils chargés depuis Supabase :", state.users.length);
     state.themes = (themes || []).map(t => ({ id: t.id, title: t.title, desc: t.description, isArchived: t.is_archived }));
     
     // Attaching docs to subjects
@@ -100,8 +101,14 @@ async function syncFromSupabase() {
     
     // Set current user profile accurately if logged in
     if (state.user && state.user.id) {
-       const p = state.users.find(u => u.id === state.user.id);
-       if (p) state.user = { id: p.id, email: p.email, username: p.username, role: p.role, attachedThemes: p.attached_themes || [] };
+       console.log("Recherche du profil pour l'ID :", state.user.id);
+       const p = state.users.find(u => String(u.id).toLowerCase() === String(state.user.id).toLowerCase());
+       if (p) {
+         console.log("Profil trouvé :", p.username, "Rôle :", p.role);
+         state.user = { id: p.id, email: p.email, username: p.username, role: p.role, attachedThemes: p.attached_themes || [] };
+       } else {
+         console.warn("ATTENTION : Aucun profil correspondant trouvé dans la table public.profiles pour cet ID !");
+       }
     }
   } catch (err) {
     console.error("Erreur de synchro Supabase:", err);
@@ -670,8 +677,31 @@ window.deleteSubject = async (e, sid) => {
   }
 }
 
-window.promptCreateUser = () => {
-  alert("Pour ajouter un utilisateur, demandez-lui de s'inscrire sur la page de connexion, ou ajoutez-le manuellement depuis la console Supabase (Authentication > Add User). Son profil sera créé automatiquement !");
+window.promptCreateUser = async () => {
+  const email = prompt("Email du nouvel utilisateur :");
+  if (!email) return;
+  const password = prompt("Mot de passe temporaire pour cet utilisateur (min 6 caractères) :");
+  if (!password || password.length < 6) return alert("Mot de passe trop court ou manquant.");
+
+  const proceed = confirm("ATTENTION : Pour des raisons de sécurité imposées par Supabase, vous allez être déconnecté juste après la création pour laisser la place au nouveau compte.\n\nÊtes-vous sûr de vouloir créer ce compte maintenant ?");
+  if (!proceed) return;
+
+  try {
+    const { data, error } = await supabaseClient.auth.signUp({
+      email: email,
+      password: password,
+    });
+    
+    if (error) {
+      alert("Erreur Supabase : " + error.message);
+    } else {
+      alert(`Compte ${email} créé !\nLe mot de passe temporaire est : ${password}\n\nVous êtes maintenant déconnecté. Veuillez vous reconnecter en Admin.`);
+      await window.logout();
+    }
+  } catch (err) {
+    console.error(err);
+    alert("Une erreur inattendue est survenue.");
+  }
 }
 
 window.addUserTheme = async (uid) => {
