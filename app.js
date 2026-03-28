@@ -100,7 +100,7 @@ const Permissions = {
     return false;
   },
 
-  canManageUsers: (u) => u && u.role === ROLES.ADMIN,
+  canManageUsers: (u) => u && (u.role === ROLES.ADMIN || u.role === ROLES.MAIRE),
   canAttachThemes: (u) => u && (u.role === ROLES.ADMIN || u.role === ROLES.MAIRE),
 
   canManageCouncil: (u) => u && [ROLES.ADMIN, ROLES.MAIRE, ROLES.ADJOINT, ROLES.DELEGUE].includes(u.role),
@@ -350,12 +350,12 @@ function renderSubjectView() {
         <div style="background:white; border:1px solid #e2e8f0; padding:1.5rem; border-radius:12px;">
            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
              <h3 style="margin:0;"><span class="material-icons-round" style="color:var(--text-muted); vertical-align:middle;">folder</span> Documents Informatiques</h3>
-             ${state.user.role !== ROLES.TECHNICIEN ? `<label class="btn btn-outline btn-sm" style="cursor:pointer; border-color:var(--primary); color:var(--primary);"><input type="file" id="fileOCR" accept="image/*, .png, .jpg, .jpeg" style="display:none" onchange="handleOCRUpload(event, ${s.id})" multiple>Importer Doc OCR</label>` : ''}
+             ${state.user.role !== ROLES.TECHNICIEN ? `<label class="btn btn-outline btn-sm" style="cursor:pointer; border-color:var(--primary); color:var(--primary);"><input type="file" id="fileOCR" accept="image/*, .png, .jpg, .jpeg, .pdf, .txt, .csv, .xls, .xlsx" style="display:none" onchange="handleDocUpload(event, ${s.id})" multiple>Importer Document</label>` : ''}
            </div>
            
            <div id="ocr-loader" style="display:none; padding:1rem; background:#f8fafc; border-radius:8px; border:1px solid #cbd5e1; text-align:center; color:#475569; margin-bottom:1rem;">
                 <div class="spinner" style="margin:0 auto 0.5rem auto; border-top-color:var(--primary); width:20px; height:20px; border-width:2px;"></div>
-                <div style="font-size:0.85rem;" id="ocr-progress">Extraction du texte (Tesseract OCR)... cela peut prendre quelques secondes.</div>
+                <div style="font-size:0.85rem;" id="ocr-progress">Extraction du texte en cours... cela peut prendre quelques secondes.</div>
            </div>
 
            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:1rem;">
@@ -368,7 +368,7 @@ function renderSubjectView() {
                      ${canManage ? `<button class="btn btn-icon" onclick="deleteDocument(${s.id}, ${d.id})" style="color:#ef4444; padding:0;"><span class="material-icons-round" style="font-size:1.2rem;">delete</span></button>` : ''}
                 </div>
               `).join('')}
-             ${(!s.docs || s.docs.length === 0) ? '<div style="grid-column:1/-1; color:#94a3b8; font-size:0.85rem; text-align:center;">Aucun document. (Les images importées seront transformées en texte par Tesseract).</div>' : ''}
+             ${(!s.docs || s.docs.length === 0) ? '<div style="grid-column:1/-1; color:#94a3b8; font-size:0.85rem; text-align:center;">Aucun document. (Les fichiers importés seront transformés en texte indexable).</div>' : ''}
            </div>
         </div>
       </div>
@@ -443,14 +443,32 @@ function renderCouncilManagement() {
   return `<div class="view-header"><h2>Agendas des Conseils Communaux</h2></div><div class="council-list" style="max-width:800px;">
   ${state.councils.map(c => {
     const dt = new Date(c.date);
-    const ag = (c.agenda || []).map(sid => state.subjects.find(s => s.id === sid)).filter(Boolean);
+    const ag = (c.agenda || []).map(item => {
+        if (typeof item === 'object') return item;
+        return state.subjects.find(s => s.id === item);
+    }).filter(Boolean);
+    const canManageAg = state.user && [ROLES.ADMIN, ROLES.MAIRE].includes(state.user.role);
     return `
       <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; margin-bottom:1rem; padding:1.5rem;">
         <h3 style="margin:0 0 1rem 0;">Séance du ${dt.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à ${dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</h3>
-        <h4 style="margin:0 0 0.5rem 0; font-size:0.9rem; color:var(--text-muted); text-transform:uppercase;">Ordre du jour</h4>
-        <ul style="margin:0; padding-left:1.5rem; display:flex; flex-direction:column; gap:0.5rem; color:var(--text-main); font-size:0.9rem;">
-           ${ag.map(s => `<li><b>${s.title}</b></li>`).join('')}
-           ${ag.length === 0 ? '<li style="list-style:none; color:#94a3b8; font-style:italic; margin-left:-1.5rem;">Aucun dossier inscrit.</li>' : ''}
+        <h4 style="margin:0 0 1rem 0; padding-bottom:0.5rem; border-bottom:1px solid #f1f5f9; font-size:0.9rem; color:var(--text-muted); text-transform:uppercase; display:flex; justify-content:space-between; align-items:center;">
+           <span>Ordre du jour</span>
+           ${canManageAg ? `<button class="btn btn-outline btn-sm" onclick="promptAddCouncilItem(${c.id})" style="padding:0.3rem 0.6rem; font-size:0.75rem;"><span class="material-icons-round" style="font-size:1rem; margin-right:0.3rem;">add</span>Point Libre</button>` : ''}
+        </h4>
+        <ul style="margin:0; padding-left:0; display:flex; flex-direction:column; gap:0.5rem; color:var(--text-main); font-size:0.9rem; list-style:none;">
+           ${ag.map(s => `
+            <li style="display:flex; justify-content:space-between; align-items:flex-start; background:#f8fafc; padding:0.8rem; border-radius:8px; border:1px solid #e2e8f0;">
+                <div style="flex:1;">
+                   <b style="line-height:1.4;">${s.title}</b>
+                   ${s.isManual ? '<span style="font-size:0.75rem; color:#8b5cf6; background:#ede9fe; padding:0.1rem 0.4rem; border-radius:4px; margin-left:0.5rem; vertical-align:middle;">Point Libre</span>' : '<span style="font-size:0.75rem; color:#0ea5e9; background:#e0f2fe; padding:0.1rem 0.4rem; border-radius:4px; margin-left:0.5rem; vertical-align:middle;">Dossier Commission</span>'}
+                </div>
+                ${canManageAg ? `
+                <div style="display:flex; gap:0.5rem; margin-left:1rem;">
+                   ${s.isManual ? `<button class="btn btn-icon" style="padding:0; width:28px; height:28px; color:#64748b; background:white; border:1px solid #cbd5e1;" onclick="editCouncilItem(${c.id}, '${s.id}')"><span class="material-icons-round" style="font-size:1.1rem;">edit</span></button>` : ''}
+                   <button class="btn btn-icon" style="padding:0; width:28px; height:28px; color:#ef4444; background:white; border:1px solid #fecaca;" onclick="removeCouncilItem(${c.id}, '${typeof s.id === 'object' ? s.id : s.id}')" title="Retirer de l'ordre du jour"><span class="material-icons-round" style="font-size:1.1rem;">close</span></button>
+                </div>` : ''}
+            </li>`).join('')}
+           ${ag.length === 0 ? '<li style="color:#94a3b8; font-style:italic; text-align:center; padding:1rem;">Aucun point à l\'ordre du jour.</li>' : ''}
         </ul>
       </div>`;
   }).join('')}
@@ -466,12 +484,15 @@ function renderUsersManagement() {
   <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:1.5rem;">
   ${state.users.map(u => {
     return `
-    <div class="card" style="border:1px solid #e2e8f0;">
+    <div class="card" style="border:1px solid #e2e8f0; display:flex; flex-direction:column;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
          <b style="font-size:1.1rem;">${u.username}</b>
-         <span class="role-badge role-${u.role.toLowerCase()}" style="margin:0; font-size:0.75rem;">${u.role}</span>
+         ${(state.user.role === ROLES.ADMIN || (state.user.role === ROLES.MAIRE && u.role !== ROLES.ADMIN)) && u.id !== state.user.id ? `
+         <select onchange="changeUserRole('${u.id}', this.value)" style="font-size:0.75rem; padding:0.1rem; border-radius:4px; border:1px solid #cbd5e1; background:white;">
+            ${Object.values(ROLES).map(r => `<option value="${r}" ${r === u.role ? 'selected' : ''}>${r}</option>`).join('')}
+         </select>` : `<span class="role-badge role-${u.role.toLowerCase()}" style="margin:0; font-size:0.75rem;">${u.role}</span>` }
       </div>
-      <div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">Email : ${u.email}</div>
+      <div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem; flex:1;">Email : ${u.email}</div>
       ${[ROLES.ADJOINT, ROLES.DELEGUE].includes(u.role) ? `
       <div style="background:#f8fafc; padding:1rem; border-radius:8px;">
          <div style="font-size:0.8rem; font-weight:600; color:var(--text-muted); margin-bottom:0.5rem;">Thèmes Rattachés :</div>
@@ -488,6 +509,10 @@ function renderUsersManagement() {
          </div>
       </div>
       ` : ''}
+      ${(state.user.role === ROLES.ADMIN || (state.user.role === ROLES.MAIRE && u.role !== ROLES.ADMIN)) && u.id !== state.user.id ? `
+      <div style="margin-top:1rem; text-align:right;">
+         <button class="btn btn-icon" onclick="deleteUser('${u.id}')" style="color:#ef4444;"><span class="material-icons-round">delete_forever</span></button>
+      </div>` : ''}
     </div>`;
   }).join('')}
    <div class="card" style="border:1px dashed #cbd5e1; background:#f8fafc; display:flex; flex-direction:column; justify-content:center; align-items:center; color:#64748b; padding:2rem; cursor:pointer;" onclick="promptCreateUser()">
@@ -643,6 +668,22 @@ window.removeUserTheme = (uid, tid) => {
   render();
 }
 
+window.deleteUser = (uid) => {
+  if (confirm("Supprimer cet utilisateur définitivement ? (Attention: Cette action est irréversible dans la base de données)")) {
+    state.users = state.users.filter(x => x.id !== uid);
+    render();
+  }
+}
+
+window.changeUserRole = (uid, newRole) => {
+  const u = state.users.find(x => x.id === uid);
+  if(u) {
+    u.role = newRole;
+    if(![ROLES.ADJOINT, ROLES.DELEGUE].includes(newRole)) u.attachedThemes = [];
+    render();
+  }
+}
+
 window.addCouncilDate = () => {
   const val = document.getElementById('new-council-dt').value;
   if (val) {
@@ -666,6 +707,45 @@ window.addToCouncil = (sid) => {
   }
 };
 
+window.promptAddCouncilItem = (cid) => {
+  const title = prompt("Titre du point libre à l'ordre du jour :");
+  if (title) {
+    const c = state.councils.find(x => x.id === cid);
+    c.agenda.push({ id: 'm_' + Date.now(), title: title, isManual: true });
+    render();
+  }
+};
+
+window.editCouncilItem = (cid, itemId) => {
+  const c = state.councils.find(x => x.id === cid);
+  const it = c.agenda.find(x => x.id === itemId);
+  if (it) {
+    const n = prompt("Modifier le titre du point libre :", it.title);
+    if (n) {
+      it.title = n;
+      render();
+    }
+  }
+};
+
+window.removeCouncilItem = (cid, itemIdRaw) => {
+  if (confirm("Retirer ce point de l'ordre du jour ?")) {
+    const c = state.councils.find(x => x.id === cid);
+    const parsedId = String(itemIdRaw).startsWith('m_') ? String(itemIdRaw) : Number(itemIdRaw);
+    
+    c.agenda = c.agenda.filter(x => {
+        if (typeof x === 'object') return x.id !== parsedId;
+        return x !== parsedId;
+    });
+    
+    if (typeof parsedId === 'number') {
+        const s = state.subjects.find(sub => sub.id === parsedId);
+        if (s) s.councilDate = null;
+    }
+    render();
+  }
+};
+
 window.sendMsg = (type, targetId, inputId) => {
   const i = document.getElementById(inputId);
   const text = i.value;
@@ -679,16 +759,10 @@ window.sendMsg = (type, targetId, inputId) => {
   }, 50);
 };
 
-// --- OCR IMPORT TESSERACT ---
-window.handleOCRUpload = async (e, sid) => {
+// --- DOCUMENT UPLOAD & PARSING ---
+window.handleDocUpload = async (e, sid) => {
   const files = e.target.files;
   if (!files.length) return;
-
-  // Check if Tesseract is loaded
-  if (typeof Tesseract === 'undefined') {
-    alert("L'outil de reconnaissance de texte Tesseract n'est pas encore chargé. Veuillez réessayer dans un instant.");
-    return;
-  }
 
   const s = state.subjects.find(x => x.id === sid);
   if (!s.docs) s.docs = [];
@@ -700,21 +774,55 @@ window.handleOCRUpload = async (e, sid) => {
   for (let f of files) {
     textInfo.innerText = "Analyse de " + f.name + "...";
     try {
-      // Lancement de l'OCR Tesseract (extraction du texte)
-      const result = await Tesseract.recognize(f, 'fra', {
-        logger: m => {
-          if (m.status === "recognizing text") {
-            textInfo.innerText = "Extraction : " + Math.round(m.progress * 100) + "%";
-          }
+      let textContent = "";
+      const ext = f.name.split('.').pop().toLowerCase();
+      
+      if (['png', 'jpg', 'jpeg'].includes(ext) || f.type.startsWith('image/')) {
+        if (typeof Tesseract === 'undefined') throw new Error("Tesseract non chargé");
+        const result = await Tesseract.recognize(f, 'fra', {
+          logger: m => { if (m.status === "recognizing text") textInfo.innerText = "Extraction Image OCR : " + Math.round(m.progress * 100) + "%"; }
+        });
+        textContent = result.data.text;
+      } else if (ext === 'txt' || ext === 'csv') {
+        textContent = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = ev => resolve(ev.target.result);
+          reader.onerror = reject;
+          reader.readAsText(f);
+        });
+      } else if (ext === 'pdf') {
+        if (typeof pdfjsLib === 'undefined') throw new Error("PDF.js non chargé");
+        const arrayBuffer = await f.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+        let fullText = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+            textInfo.innerText = `Extraction PDF : Page ${i}/${pdf.numPages}`;
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            const strings = content.items.map(item => item.str);
+            fullText += strings.join(" ") + "\n";
         }
-      });
-      const textContent = result.data.text;
+        textContent = fullText;
+      } else if (['xls', 'xlsx'].includes(ext)) {
+        if (typeof XLSX === 'undefined') throw new Error("SheetJS non chargé");
+        const arrayBuffer = await f.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        let fullText = "";
+        workbook.SheetNames.forEach(sheetName => {
+            fullText += `--- FEUILLE : ${sheetName} ---\n`;
+            const csv = XLSX.utils.sheet_to_csv(workbook.Sheets[sheetName]);
+            fullText += csv + "\n\n";
+        });
+        textContent = fullText;
+      } else {
+        throw new Error("Format non supporté : " + ext);
+      }
 
       s.docs.push({ id: Date.now() + Math.random(), title: "[Importé] " + f.name, content: textContent || "Aucun texte identifié." });
-      logHistory(s.themeId, 'AJOUT_DOCUMENT', `Document OCR importé : ${f.name}`);
+      logHistory(s.themeId, 'AJOUT_DOCUMENT', `Document importé et transcrit : ${f.name}`);
     } catch (err) {
       console.error(err);
-      alert("Erreur lors de la lecture OCR de l'image : " + err.message);
+      alert("Erreur lors de la lecture du fichier " + f.name + " : " + err.message);
     }
   }
   loader.style.display = 'none';
