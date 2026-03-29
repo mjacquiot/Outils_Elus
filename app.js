@@ -89,7 +89,7 @@ async function syncFromSupabase() {
        vote: s.vote,
        docs: []
     }));
-    const allDocs = (documents || []).map(d => ({ id: d.id, subject_id: d.subject_id, title: d.title, content: d.content }));
+    const allDocs = (documents || []).map(d => ({ id: d.id, subject_id: d.subject_id, title: d.title, content: d.content, fileUrl: d.file_url }));
     
     allSubjects.forEach(s => {
       s.docs = allDocs.filter(d => d.subject_id === s.id);
@@ -193,6 +193,7 @@ function getContentForView() {
     case 'subject': return Permissions.isPublic() ? '' : renderSubjectView();
     case 'council': return Permissions.isPublic() ? '' : renderCouncilManagement();
     case 'users': return renderUsersManagement();
+    case 'rag_ia': return renderRagIaView();
     default: return `<h2>Vue manquante</h2><button class="btn btn-primary" onclick="navigate('dashboard')">Retour</button>`;
   }
 }
@@ -203,14 +204,14 @@ function renderLogin() {
     <div class="auth-wrapper"><div class="auth-card">
       <div style="font-size:3rem; color:var(--primary); margin-bottom:1rem; text-align:center;"><span class="material-icons-round" style="font-size:inherit;">account_balance</span></div>
       <h2 style="margin-bottom:0.5rem; text-align:center;">EluConnect</h2><p style="color:var(--text-muted); margin-bottom:2rem; text-align:center;">Portail Collaboratif et Administratif</p>
-      <div style="display:flex; flex-direction:column; gap:1rem;">
-        <input type="text" id="login-user" placeholder="Nom d'utilisateur" style="padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;" value="admin">
-        <input type="password" id="login-pass" placeholder="Mot de passe" style="padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;" value="">
-        <button class="btn btn-primary" onclick="handleLogin()" style="justify-content:center; padding:1rem; width:100%;">Connexion</button>
+      <form style="display:flex; flex-direction:column; gap:1rem;" onsubmit="handleLogin(event)">
+        <input type="text" id="login-user" placeholder="Nom d'utilisateur" style="padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;" value="admin" autocomplete="username">
+        <input type="password" id="login-pass" placeholder="Mot de passe" style="padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;" value="" autocomplete="current-password">
+        <button type="submit" class="btn btn-primary" style="justify-content:center; padding:1rem; width:100%;">Connexion</button>
         
         <hr style="border:0; border-top:1px solid #ddd; margin:0.5rem 0">
-        <button class="btn btn-outline" onclick="navigate('public_login')" style="justify-content:center; width:100%;"><span class="material-icons-round" style="margin-right:0.5rem;">public</span> Connexion en tant que citoyen</button>
-      </div>
+        <button type="button" class="btn btn-outline" onclick="navigate('public_login')" style="justify-content:center; width:100%;"><span class="material-icons-round" style="margin-right:0.5rem;">public</span> Connexion en tant que citoyen</button>
+      </form>
     </div></div>
   `;
 }
@@ -243,6 +244,7 @@ function renderAppLayout(content) {
   return `
     <header class="glass-header"><div class="brand" onclick="navigate('dashboard')" style="cursor:pointer"><span class="material-icons-round" style="color:var(--primary);">account_balance</span> <span>EluConnect</span></div>
       <div style="display:flex; align-items:center; gap:0.5rem">
+        ${!isP ? `<button class="btn btn-icon" onclick="navigate('rag_ia')" title="RAG IA"><span class="material-icons-round">smart_toy</span></button>` : ''}
         ${Permissions.canManageUsers(u) ? `<button class="btn btn-icon" onclick="navigate('users')" title="Administration Droits"><span class="material-icons-round">manage_accounts</span></button>` : ''}
         ${(!isP && Permissions.canManageCouncil(u)) ? `<button class="btn btn-icon" onclick="navigate('council')" title="Conseils"><span class="material-icons-round">calendar_month</span></button>` : ''}
         <div style="text-align:right; margin-left:1rem; margin-right:0.5rem;"><div style="font-size:0.75rem; font-weight:800; text-transform:uppercase;">${u.username}</div><div class="role-badge role-${isP ? 'elu' : u.role.toLowerCase()}" style="margin:0; padding:0.1rem 0.4rem; font-size:0.65rem;">${u.role}</div></div>
@@ -490,7 +492,10 @@ function renderDocViewer() {
      <div style="background:white; width:100%; max-width:900px; height:85vh; border-radius:12px; display:flex; flex-direction:column; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
        <div style="display:flex; justify-content:space-between; align-items:center; padding:1.5rem; border-bottom:1px solid #e2e8f0; background:#f8fafc; border-radius:12px 12px 0 0;">
          <h3 style="margin:0; display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round" style="color:#ef4444;">description</span> ${sanitizeHTML(d.title)}</h3>
-         <button class="btn btn-icon" onclick="closeDoc()"><span class="material-icons-round">close</span></button>
+         <div style="display:flex; gap:0.5rem;">
+           ${d.fileUrl ? `<a href="${d.fileUrl}" target="_blank" class="btn btn-outline btn-sm"><span class="material-icons-round" style="font-size:1rem; margin-right:0.3rem;">download</span>Télécharger Original</a>` : ''}
+           <button class="btn btn-icon" onclick="closeDoc()"><span class="material-icons-round">close</span></button>
+         </div>
        </div>
        <div style="flex:1; padding:2.5rem; overflow-y:auto; line-height:1.7; color:#334155; font-size:0.95rem; white-space:pre-wrap; font-family:Georgia, serif;">${sanitizeHTML(d.content)}</div>
      </div>
@@ -581,7 +586,8 @@ function renderUsersManagement() {
 }
 
 // --- ACTIONS / UTILS ---
-window.handleLogin = async () => {
+window.handleLogin = async (e) => {
+  if (e) e.preventDefault();
   const userV = document.getElementById('login-user').value.trim();
   const passV = document.getElementById('login-pass').value;
 
@@ -879,7 +885,26 @@ window.handleDocUpload = async (e, sid) => {
         throw new Error("Format non supporté : " + ext);
       }
 
-      await supabaseClient.from('documents').insert({ subject_id: sid, title: "[Importé] " + f.name, content: textContent || "Aucun texte identifié." });
+      // Supabase Storage upload (Origin File <= 5MB)
+      let fileUrl = null;
+      if (f.size <= 5 * 1024 * 1024) {
+        try {
+          const uniquePath = `docs/${Date.now()}_${Math.random().toString(36).substring(7)}_${f.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+          const { data: uploadData, error: uploadErr } = await supabaseClient.storage.from('documents_files').upload(uniquePath, f);
+          if (!uploadErr && uploadData) {
+            const { data: urlData } = supabaseClient.storage.from('documents_files').getPublicUrl(uploadData.path);
+            fileUrl = urlData.publicUrl;
+          } else {
+            console.warn("Upload Storage échoué", uploadErr);
+          }
+        } catch(err) {
+          console.warn("Erreur Storage upload:", err);
+        }
+      } else {
+        console.warn("Le fichier " + f.name + " ("+(f.size/1024/1024).toFixed(1)+"Mo) dépasse 5Mo, il ne sera uploadé que sous forme de texte.");
+      }
+
+      await supabaseClient.from('documents').insert({ subject_id: sid, title: "[Importé] " + f.name, content: textContent || "Aucun texte identifié.", file_url: fileUrl });
       logHistory(s.themeId, 'AJOUT_DOCUMENT', `Document importé et transcrit : ${f.name}`);
     } catch (err) {
       console.error(err);
@@ -949,6 +974,224 @@ window.submitPublicVote = async (subjectId, optionIndex) => {
     alert("Vérification échouée.");
   }
 };
+// --- RAG IA & ANONYMISATION ---
+window.renderRagIaView = () => {
+  const profile = state.users.find(u => u.id === state.user.id);
+  const pc = profile && profile.personal_context ? profile.personal_context : (localStorage.getItem('rag_pc') || '');
+  const mc = localStorage.getItem('rag_mc') || ''; // Mandatory entities
+  
+  const allDocs = [];
+  state.themes.filter(t => !t.isArchived).forEach(t => {
+     let themeDocs = [];
+     const subs = state.subjects.filter(s => s.themeId === t.id && Permissions.canSeeSubject(s, state.user));
+     subs.forEach(s => {
+        if(s.docs && s.docs.length > 0) {
+            themeDocs.push({ subject: s, docs: s.docs });
+        }
+     });
+     if(themeDocs.length > 0) allDocs.push({ theme: t, subjects: themeDocs });
+  });
+
+  return `
+    <div class="view-header">
+      <h2><span class="material-icons-round" style="vertical-align:middle; color:var(--primary); font-size:2rem; margin-right:0.5rem;">smart_toy</span>IA & Rédaction Assistée (RAG)</h2>
+      <p style="color:var(--text-muted);">Générez des requêtes IA enrichies par vos documents tout en préservant la confidentialité de vos données (100% anonymisé en local).</p>
+    </div>
+    
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:2rem;">
+      <div style="display:flex; flex-direction:column; gap:1.5rem;">
+         <div class="card" style="border:1px solid #e2e8f0;">
+             <h3 style="margin-top:0; font-size:1.1rem; border-bottom:1px solid #f1f5f9; padding-bottom:0.5rem;">1. Paramètres AI Personnels</h3>
+             <label style="font-size:0.85rem; font-weight:600; display:block; margin-bottom:0.3rem;">Votre contexte personnel (ex: Maire de X, mandat actuel...)</label>
+             <textarea id="rag_pc" style="width:100%; height:80px; padding:0.5rem; border-radius:6px; border:1px solid #cbd5e1; margin-bottom:1rem; font-family:inherit;">${sanitizeHTML(pc)}</textarea>
+             
+             <label style="font-size:0.85rem; font-weight:600; display:block; margin-bottom:0.3rem;">Entités à pseudonymiser obligatoirement (Noms, Villes... séparées par des virgules)</label>
+             <textarea id="rag_mc" style="width:100%; height:60px; padding:0.5rem; border-radius:6px; border:1px solid #cbd5e1; margin-bottom:0.5rem; font-family:inherit;">${sanitizeHTML(mc)}</textarea>
+             
+             <button class="btn btn-outline btn-sm" onclick="saveRagSettings()">Sauvegarder Paramètres</button>
+         </div>
+
+         <div class="card" style="border:1px solid #e2e8f0; height:350px; display:flex; flex-direction:column;">
+             <h3 style="margin-top:0; font-size:1.1rem; border-bottom:1px solid #f1f5f9; padding-bottom:0.5rem;">2. Documents à inclure dans le contexte IA</h3>
+             <div style="flex:1; overflow-y:auto; font-size:0.9rem;">
+                ${allDocs.length === 0 ? '<p style="color:#94a3b8; font-style:italic;">Aucun document disponible. Uploadez des fichiers dans vos dossiers.</p>' : ''}
+                ${allDocs.map(t => `
+                   <div style="margin-bottom:1rem;">
+                     <div style="font-weight:600; color:var(--primary);">${sanitizeHTML(t.theme.title)}</div>
+                     ${t.subjects.map(s => `
+                        <div style="margin-left:1rem; margin-top:0.4rem;">
+                           <div style="font-weight:500; font-size:0.85rem; color:#475569;">↳ ${sanitizeHTML(s.subject.title)}</div>
+                           <div style="margin-left:1.5rem; display:flex; flex-direction:column; gap:0.4rem; margin-top:0.4rem;">
+                              ${s.docs.map(d => `
+                                <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+                                   <input type="checkbox" class="rag-doc-cb" value="${d.id}" data-title="${sanitizeHTML(d.title)}">
+                                   <span style="font-size:0.85rem; color:var(--text-main);">${sanitizeHTML(d.title)}</span>
+                                </label>
+                              `).join('')}
+                           </div>
+                        </div>
+                     `).join('')}
+                   </div>
+                `).join('')}
+             </div>
+         </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:1.5rem;">
+         <div class="card" style="border:1px solid #e2e8f0;">
+             <h3 style="margin-top:0; font-size:1.1rem; border-bottom:1px solid #f1f5f9; padding-bottom:0.5rem;">3. Votre Demande (Prompt)</h3>
+             <textarea id="rag_prompt" style="width:100%; height:120px; padding:0.8rem; border-radius:6px; border:1px solid #cbd5e1; margin-bottom:1rem; font-family:inherit;" placeholder="Rédige moi une synthèse structurée de ces documents, en tenant compte de ma fonction..."></textarea>
+             
+             <button class="btn btn-primary" onclick="generateRagPrompt()" style="width:100%; justify-content:center; padding:1rem; font-size:1.05rem;"><span class="material-icons-round" style="margin-right:0.5rem;">security</span> Compiler et Pseudonymiser le Prompt</button>
+             <div id="rag-loader" style="display:none; text-align:center; margin-top:1rem; color:#64748b; font-size:0.85rem;"><div class="spinner" style="width:20px;height:20px;border-width:2px;margin:0 auto 0.5rem auto;"></div>Traitement et pseudonymisation locale en cours...</div>
+         </div>
+
+         <div class="card" style="border:1px solid #10b981; background:#f0fdf4; display:none;" id="rag_result_container">
+             <h3 style="margin-top:0; font-size:1.1rem; color:#047857; display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round">check_circle</span> Prompt Prêt (100% Anonyme)</h3>
+             <p style="font-size:0.85rem; color:#065f46; margin-bottom:1rem;">Copiez ce texte et collez-le dans ChatGPT, Gemini ou autre LLM. Vos données sensibles sont remplacées ci-dessous :</p>
+             <textarea id="rag_compiled" style="width:100%; height:140px; padding:0.8rem; border-radius:6px; border:1px solid #a7f3d0; margin-bottom:0.5rem; font-family:inherit; font-size:0.8rem;" readonly></textarea>
+             <button class="btn btn-primary btn-sm" onclick="copyRagPrompt()">Copier le Prompt</button>
+             
+             <hr style="border:0; border-top:1px dashed #6ee7b7; margin:1.5rem 0;">
+             
+             <h3 style="margin-top:0; font-size:1.1rem; color:#047857;">4. Désanonymiser la réponse du LLM</h3>
+             <p style="font-size:0.85rem; color:#065f46; margin-bottom:0.5rem;">Collez la réponse obtenue par votre IA pour restaurer instantanément les vrais noms :</p>
+             <textarea id="rag_llm_response" style="width:100%; height:120px; padding:0.8rem; border-radius:6px; border:1px solid #cbd5e1; margin-bottom:0.5rem; font-family:inherit; font-size:0.85rem; background:white;"></textarea>
+             <button class="btn btn-outline btn-sm" style="border-color:#10b981; color:#10b981; width:100%; justify-content:center;" onclick="deanonymiseRag()">Restaurer les Vrais Noms / Lieux</button>
+         </div>
+      </div>
+    </div>
+  `;
+};
+
+window.saveRagSettings = async () => {
+   const pc = document.getElementById('rag_pc').value;
+   const mc = document.getElementById('rag_mc').value;
+   localStorage.setItem('rag_pc', pc);
+   localStorage.setItem('rag_mc', mc);
+   
+   if(state.user && state.user.id) {
+       await supabaseClient.from('profiles').update({ personal_context: pc }).eq('id', state.user.id);
+   }
+   alert("Paramètres de contexte IA sauvegardés !");
+};
+
+window.generateRagPrompt = async () => {
+   const promptText = document.getElementById('rag_prompt').value;
+   if(!promptText) return alert("Veuillez entrer une consigne (prompt) pour l'IA.");
+   
+   document.getElementById('rag-loader').style.display = 'block';
+   document.getElementById('rag_result_container').style.display = 'none';
+
+   setTimeout(async () => {
+       const pc = document.getElementById('rag_pc').value;
+       const mc = document.getElementById('rag_mc').value.split(',').map(s=>s.trim()).filter(Boolean);
+       
+       const cbs = document.querySelectorAll('.rag-doc-cb:checked');
+       let docsContent = "";
+       cbs.forEach(cb => {
+           const docId = parseInt(cb.value);
+           const d = state.subjects.flatMap(s=>s.docs||[]).find(x=>x.id === docId);
+           if(d) {
+               docsContent += `\n\n--- DOCUMENT: ${d.title} ---\n${d.content}\n`;
+           }
+       });
+
+       let fullContext = "";
+       if(pc) fullContext += `[CONTEXTE UTILISATEUR]\n${pc}\n\n`;
+       if(docsContent) fullContext += `[DOCUMENTS FOURNIS]\n${docsContent}\n\n`;
+       fullContext += `[DIRECTIVE]\n${promptText}`;
+
+       const res = await pseudonymiseText(fullContext, mc);
+       
+       document.getElementById('rag_compiled').value = res.text;
+       document.getElementById('rag_result_container').style.display = 'block';
+       document.getElementById('rag-loader').style.display = 'none';
+       
+       localStorage.setItem('rag_keys', JSON.stringify(res.map));
+   }, 100); // Let UI update loader
+};
+
+window.copyRagPrompt = () => {
+    const el = document.getElementById('rag_compiled');
+    el.select();
+    document.execCommand('copy');
+    alert("Prompt anonymisé copié dans le presse-papier !");
+};
+
+window.deanonymiseRag = () => {
+   let llmText = document.getElementById('rag_llm_response').value;
+   if(!llmText) return alert("Veuillez coller la réponse du LLM en premier.");
+   try {
+       const map = JSON.parse(localStorage.getItem('rag_keys') || '{}');
+       for(const [real, fake] of Object.entries(map)) {
+           const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+           const regex = new RegExp(escapeRegExp(fake), 'gi'); // Ignorer la casse pour le retour LLM
+           llmText = llmText.replace(regex, real);
+       }
+       document.getElementById('rag_llm_response').value = llmText;
+       alert("Désanonymisation terminée. Vos informations d'origine ont été réinsérées.");
+   } catch(e) {
+       console.error(e);
+       alert("Erreur lors de la désanonymisation : " + e.message);
+   }
+};
+
+window.pseudonymiseText = async (text, mandatoryEntities) => {
+   let map = {}; 
+   
+   const getFakeFor = (realStr, type) => {
+       if(!realStr || realStr.length < 2) return realStr;
+       if (map[realStr]) return map[realStr];
+       let fake = "";
+       if (type === 'Person') fake = window.faker.person.fullName();
+       else if (type === 'Place') fake = window.faker.location.city();
+       else if (type === 'Organization') fake = window.faker.company.name();
+       else if (type === 'Email') fake = window.faker.internet.email();
+       else if (type === 'Phone') mask = "06" + Math.floor(10000000 + Math.random() * 90000000); // Faker phone sometimes weird in FR format
+       else fake = window.faker.word.noun();
+       
+       if(!fake && type === 'Phone') fake = "06" + Math.floor(10000000 + Math.random() * 90000000);
+       map[realStr] = fake;
+       return fake;
+   };
+
+   // 1. Mandatory Entités
+   mandatoryEntities.forEach(ent => getFakeFor(ent, 'Organization'));
+
+   // 2. Extract with Regex (Emails & Phones FR)
+   const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi;
+   const emails = text.match(emailRegex) || [];
+   emails.forEach(e => getFakeFor(e, 'Email'));
+
+   const phoneRegex = /(?:(?:\+|00)33|0)\s*[1-9](?:[\s.-]*\d{2}){4}/g;
+   const phones = text.match(phoneRegex) || [];
+   phones.forEach(p => getFakeFor(p, 'Phone'));
+
+   // 3. Extract NLP data (Noms, Lieux, Entreprises) via Compromise
+   if (window.nlp) {
+       const doc = window.nlp(text);
+       doc.people().out('array').forEach(p => getFakeFor(p.trim(), 'Person'));
+       doc.places().out('array').forEach(p => getFakeFor(p.trim(), 'Place'));
+       doc.organizations().out('array').forEach(o => getFakeFor(o.trim(), 'Organization'));
+   }
+
+   // 4. Repasser sur le texte par ordre de longueur décroissant pour ne pas casser les mots imbriqués
+   let newText = text;
+   const sortedKeys = Object.keys(map).sort((a,b) => b.length - a.length);
+   
+   sortedKeys.forEach(real => {
+       const fake = map[real];
+       const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+       const regex = new RegExp(`\\b${escapeRegExp(real)}\\b`, 'g'); // Mots entiers si possible
+       // Fallback on simple replace globally if word boundary misses due to accents
+       newText = newText.replace(regex, fake);
+       newText = newText.split(real).join(fake); // brut force replace for accents and punctuation weirdness
+   });
+
+   return { text: newText, map: map };
+};
+
 // Lancement du rendu initial garanti
 try {
   console.log("Tentative de rendu initial...");
