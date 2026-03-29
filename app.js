@@ -1031,26 +1031,37 @@ window.renderRagIaView = () => {
 
   return `
     <div class="view-header">
-      <h2><span class="material-icons-round" style="vertical-align:middle; color:var(--primary); font-size:2rem; margin-right:0.5rem;">smart_toy</span>IA & Rédaction Assistée (RAG)</h2>
-      <p style="color:var(--text-muted);">Générez des requêtes IA enrichies par vos documents tout en préservant la confidentialité de vos données (100% anonymisé en local).</p>
+      <h2 style="display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round" style="color:var(--primary); font-size:2.5rem; filter:drop-shadow(0 4px 3px rgb(0 0 0 / 0.07));">smart_toy</span>IA & Rédaction Assistée (RAG)</h2>
+      <p style="color:var(--text-muted); font-size:1.05rem;">Générez des requêtes IA intelligentes enrichies par vos documents tout en préservant 100% de la confidentialité de vos données sensibles.</p>
     </div>
     
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:2rem;">
+    <div style="margin-bottom:2rem; background:white; border-radius:12px; border:1px solid #e2e8f0; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); overflow:hidden;">
+       <div style="background:linear-gradient(to right, #f8fafc, #f1f5f9); padding:1rem 1.5rem; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0;" onclick="toggleRagSettings()">
+          <h3 style="margin:0; font-size:1.1rem; display:flex; align-items:center; gap:0.5rem; color:var(--text-main);"><span class="material-icons-round" style="color:var(--primary);">tune</span> Paramètres de contexte et de pseudonymisation</h3>
+          <span class="material-icons-round" id="rag-settings-icon" style="color:#64748b; background:white; border-radius:50%; box-shadow:0 1px 2px rgba(0,0,0,0.1); padding:0.2rem;">${pc ? 'expand_more' : 'expand_less'}</span>
+       </div>
+       <div id="rag-settings-body" style="padding:1.5rem 2rem; display:${pc ? 'none' : 'block'}; background:white;">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:2rem;">
+              <div>
+                  <label style="font-size:0.9rem; font-weight:600; display:block; margin-bottom:0.5rem; color:#334155;"><span class="material-icons-round" style="font-size:1.1rem; vertical-align:middle; color:#8b5cf6;">person</span> Votre contexte personnel (rôle, mandat...)</label>
+                  <textarea id="rag_pc" style="width:100%; height:100px; padding:1rem; border-radius:8px; border:1px solid #cbd5e1; font-family:inherit; background:#f8fafc; transition:all 0.2s;" placeholder="Ex: Je suis Maire de la commune de X...">${sanitizeHTML(pc)}</textarea>
+              </div>
+              <div>
+                  <label style="font-size:0.9rem; font-weight:600; display:block; margin-bottom:0.5rem; color:#334155;"><span class="material-icons-round" style="font-size:1.1rem; vertical-align:middle; color:#f43f5e;">gpp_bad</span> Entités à pseudonymiser obligatoirement</label>
+                  <textarea id="rag_mc" style="width:100%; height:100px; padding:1rem; border-radius:8px; border:1px solid #cbd5e1; font-family:inherit; background:#f8fafc; transition:all 0.2s;" placeholder="ex: Jean Dupont, Mairie de Trifouilly (séparé par des virgules)">${sanitizeHTML(mc)}</textarea>
+              </div>
+          </div>
+          <div style="text-align:right; margin-top:1rem;">
+              <button class="btn btn-primary" onclick="saveRagSettings()"><span class="material-icons-round">save</span> Sauvegarder Paramètres</button>
+          </div>
+       </div>
+    </div>
+    
+    <div style="display:grid; grid-template-columns:1fr 1.2fr; gap:2rem;">
       <div style="display:flex; flex-direction:column; gap:1.5rem;">
-         <div class="card" style="border:1px solid #e2e8f0;">
-             <h3 style="margin-top:0; font-size:1.1rem; border-bottom:1px solid #f1f5f9; padding-bottom:0.5rem;">1. Paramètres AI Personnels</h3>
-             <label style="font-size:0.85rem; font-weight:600; display:block; margin-bottom:0.3rem;">Votre contexte personnel (ex: Maire de X, mandat actuel...)</label>
-             <textarea id="rag_pc" style="width:100%; height:80px; padding:0.5rem; border-radius:6px; border:1px solid #cbd5e1; margin-bottom:1rem; font-family:inherit;">${sanitizeHTML(pc)}</textarea>
-             
-             <label style="font-size:0.85rem; font-weight:600; display:block; margin-bottom:0.3rem;">Entités à pseudonymiser obligatoirement (Noms, Villes... séparées par des virgules)</label>
-             <textarea id="rag_mc" style="width:100%; height:60px; padding:0.5rem; border-radius:6px; border:1px solid #cbd5e1; margin-bottom:0.5rem; font-family:inherit;">${sanitizeHTML(mc)}</textarea>
-             
-             <button class="btn btn-outline btn-sm" onclick="saveRagSettings()">Sauvegarder Paramètres</button>
-         </div>
-
-         <div class="card" style="border:1px solid #e2e8f0; height:350px; display:flex; flex-direction:column;">
-             <h3 style="margin-top:0; font-size:1.1rem; border-bottom:1px solid #f1f5f9; padding-bottom:0.5rem;">2. Documents à inclure dans le contexte IA</h3>
-             <div style="flex:1; overflow-y:auto; font-size:0.9rem;">
+         <div class="card" style="border:1px solid #e2e8f0; height:450px; display:flex; flex-direction:column; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
+             <h3 style="margin:0 0 1rem 0; font-size:1.1rem; border-bottom:1px solid #f1f5f9; padding-bottom:1rem; display:flex; align-items:center; gap:0.5rem; color:var(--text-main);"><span class="material-icons-round" style="color:#0ea5e9;">folder_open</span> Documents à inclure dans l'IA</h3>
+             <div style="flex:1; overflow-y:auto; font-size:0.95rem; padding-right:0.5rem;">
                 ${validCouncils.length > 0 ? `
                    <div style="margin-bottom:1.5rem; padding-bottom:1rem; border-bottom:1px dashed #cbd5e1;">
                       <div style="font-weight:600; font-size:0.95rem; color:#f59e0b; margin-bottom:0.8rem;"><span class="material-icons-round" style="font-size:1.1rem; vertical-align:middle;">calendar_month</span> Conseils Communaux (5 derniers)</div>
@@ -1102,26 +1113,42 @@ window.renderRagIaView = () => {
       </div>
 
       <div style="display:flex; flex-direction:column; gap:1.5rem;">
-         <div class="card" style="border:1px solid #e2e8f0;">
-             <h3 style="margin-top:0; font-size:1.1rem; border-bottom:1px solid #f1f5f9; padding-bottom:0.5rem;">3. Votre Demande (Prompt)</h3>
-             <textarea id="rag_prompt" style="width:100%; height:120px; padding:0.8rem; border-radius:6px; border:1px solid #cbd5e1; margin-bottom:1rem; font-family:inherit;" placeholder="Rédige moi une synthèse structurée de ces documents, en tenant compte de ma fonction..."></textarea>
-             
-             <button class="btn btn-primary" onclick="generateRagPrompt()" style="width:100%; justify-content:center; padding:1rem; font-size:1.05rem;"><span class="material-icons-round" style="margin-right:0.5rem;">security</span> Compiler et Pseudonymiser le Prompt</button>
-             <div id="rag-loader" style="display:none; text-align:center; margin-top:1rem; color:#64748b; font-size:0.85rem;"><div class="spinner" style="width:20px;height:20px;border-width:2px;margin:0 auto 0.5rem auto;"></div>Traitement et pseudonymisation locale en cours...</div>
-         </div>
+         <div class="card" style="border:1px solid #e2e8f0; display:flex; flex-direction:column; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); min-height:450px;">
+             <!-- Prompt Input -->
+             <div id="rag-input-section" style="flex:1; display:flex; flex-direction:column;">
+                <h3 style="margin:0 0 1rem 0; font-size:1.1rem; display:flex; align-items:center; gap:0.5rem; color:var(--text-main);"><span class="material-icons-round" style="color:#8b5cf6;">draw</span> Votre Demande (Prompt)</h3>
+                <textarea id="rag_prompt" style="flex:1; width:100%; min-height:150px; padding:1rem; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:1rem; font-family:inherit; font-size:1rem; resize:none; background:#f8fafc;" placeholder="Rédigez ici votre question pour l'IA (ex: Fais-moi une synthèse structurée de ces documents en prenant compte de ma fonction...)"></textarea>
+                
+                <button class="btn btn-primary" onclick="generateRagPrompt()" style="width:100%; justify-content:center; padding:1rem; font-size:1.1rem; background:linear-gradient(135deg, var(--primary) 0%, #3730a3 100%);"><span class="material-icons-round" style="margin-right:0.5rem;">security</span> Générer le Prompt Anonymisé</button>
+                <div id="rag-loader" style="display:none; text-align:center; margin-top:1.5rem; color:#64748b; font-size:0.9rem;"><div class="spinner" style="width:24px;height:24px;border-width:3px;margin:0 auto 0.5rem auto;"></div>Pseudonymisation locale en cours...</div>
+             </div>
 
-         <div class="card" style="border:1px solid #10b981; background:#f0fdf4; display:none;" id="rag_result_container">
-             <h3 style="margin-top:0; font-size:1.1rem; color:#047857; display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round">check_circle</span> Prompt Prêt (100% Anonyme)</h3>
-             <p style="font-size:0.85rem; color:#065f46; margin-bottom:1rem;">Copiez ce texte et collez-le dans ChatGPT, Gemini ou autre LLM. Vos données sensibles sont remplacées ci-dessous :</p>
-             <textarea id="rag_compiled" style="width:100%; height:140px; padding:0.8rem; border-radius:6px; border:1px solid #a7f3d0; margin-bottom:0.5rem; font-family:inherit; font-size:0.8rem;" readonly></textarea>
-             <button class="btn btn-primary btn-sm" onclick="copyRagPrompt()">Copier le Prompt</button>
-             
-             <hr style="border:0; border-top:1px dashed #6ee7b7; margin:1.5rem 0;">
-             
-             <h3 style="margin-top:0; font-size:1.1rem; color:#047857;">4. Désanonymiser la réponse du LLM</h3>
-             <p style="font-size:0.85rem; color:#065f46; margin-bottom:0.5rem;">Collez la réponse obtenue par votre IA pour restaurer instantanément les vrais noms :</p>
-             <textarea id="rag_llm_response" style="width:100%; height:120px; padding:0.8rem; border-radius:6px; border:1px solid #cbd5e1; margin-bottom:0.5rem; font-family:inherit; font-size:0.85rem; background:white;"></textarea>
-             <button class="btn btn-outline btn-sm" style="border-color:#10b981; color:#10b981; width:100%; justify-content:center;" onclick="deanonymiseRag()">Restaurer les Vrais Noms / Lieux</button>
+             <!-- Compiled Prompt Output -->
+             <div id="rag_result_container" style="display:none; flex-direction:column; flex:1;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+                    <h3 style="margin:0; font-size:1.1rem; color:#059669; display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round">task_alt</span> Prompt Prêt (100% Anonyme)</h3>
+                    <button class="btn btn-icon" style="color:#64748b;" onclick="resetRagUI()" title="Recommencer"><span class="material-icons-round">refresh</span></button>
+                </div>
+                <p style="font-size:0.9rem; color:#047857; background:#d1fae5; padding:0.8rem; border-radius:8px; border:1px solid #a7f3d0; margin-top:0;">1. Copiez ce texte et collez-le dans l'interface de votre IA (ChatGPT, Claude, Gemini...). Les données sensibles ont été masquées.</p>
+                <textarea id="rag_compiled" style="width:100%; height:120px; padding:1rem; border-radius:8px; border:1px solid #a7f3d0; background:#f0fdf4; margin-bottom:0.5rem; font-family:inherit; font-size:0.85rem;" readonly></textarea>
+                <button class="btn btn-outline" style="border-color:#10b981; color:#059669; justify-content:center;" onclick="copyRagPrompt()"><span class="material-icons-round" style="margin-right:0.4rem;">content_copy</span>Copier le texte</button>
+                
+                <div style="margin:2rem 0; border-top:1px dashed #cbd5e1; position:relative;">
+                   <span style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:white; padding:0 1rem; color:#94a3b8; font-size:0.85rem; font-weight:600;"><span class="material-icons-round" style="font-size:1.2rem; vertical-align:middle;">arrow_downward</span> ENSUITE</span>
+                </div>
+                
+                <h3 style="margin:0 0 0.5rem 0; font-size:1.1rem; color:var(--text-main); display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round" style="color:#f59e0b;">auto_fix_high</span> 2. Restaurer les noms</h3>
+                <p style="font-size:0.85rem; color:#64748b; margin-top:0;">Collez la réponse fournie par l'IA ci-dessous. Les vraies informations réapparaîtront instantanément.</p>
+                <textarea id="rag_llm_response" style="width:100%; height:120px; padding:1rem; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:0.5rem; font-family:inherit; font-size:0.9rem; background:#f8fafc;" placeholder="Collez la réponse factice de l'IA ici..."></textarea>
+                <button class="btn btn-primary" style="width:100%; justify-content:center; background:#f59e0b; border-color:#d97706; color:white;" onclick="deanonymiseRag()">Révéler les vraies données</button>
+                
+                <!-- Magic result div -->
+                <div id="rag-clean-result" style="display:none; margin-top:1.5rem; padding:1.5rem; background:white; border-radius:8px; border:2px solid #8b5cf6; box-shadow:0 10px 15px -3px rgba(139,92,246,0.1);">
+                   <div style="color:#6d28d9; font-weight:700; margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round">verified</span> Réponse dé-anonymisée :</div>
+                   <div id="rag-clean-text" style="font-family:Georgia, serif; line-height:1.7; color:#334155; font-size:1rem; white-space:pre-wrap;"></div>
+                   <button class="btn btn-outline btn-sm" style="margin-top:1rem; width:100%; justify-content:center; border-color:#8b5cf6; color:#6d28d9;" onclick="copyFinalRagResult()"><span class="material-icons-round" style="margin-right:0.4rem;">content_copy</span>Copier cette réponse</button>
+                </div>
+             </div>
          </div>
       </div>
     </div>
@@ -1146,6 +1173,31 @@ window.toggleRagDocsByArray = (el, idArray) => {
        const box = document.getElementById('rag-cb-' + id);
        if(box) box.checked = isChecked;
    });
+};
+
+window.toggleRagSettings = () => {
+    const el = document.getElementById('rag-settings-body');
+    const icon = document.getElementById('rag-settings-icon');
+    if (el.style.display === 'none') {
+        el.style.display = 'block';
+        icon.innerText = 'expand_less';
+    } else {
+        el.style.display = 'none';
+        icon.innerText = 'expand_more';
+    }
+};
+
+window.resetRagUI = () => {
+   document.getElementById('rag_result_container').style.display = 'none';
+   document.getElementById('rag-input-section').style.display = 'flex';
+   document.getElementById('rag_llm_response').value = '';
+   document.getElementById('rag-clean-result').style.display = 'none';
+};
+
+window.copyFinalRagResult = () => {
+    const text = document.getElementById('rag-clean-text').innerText;
+    navigator.clipboard.writeText(text);
+    alert("Résultat copié !");
 };
 
 window.generateRagPrompt = async () => {
@@ -1177,7 +1229,8 @@ window.generateRagPrompt = async () => {
        const res = await pseudonymiseText(fullContext, mc);
        
        document.getElementById('rag_compiled').value = res.text;
-       document.getElementById('rag_result_container').style.display = 'block';
+       document.getElementById('rag-input-section').style.display = 'none';
+       document.getElementById('rag_result_container').style.display = 'flex';
        document.getElementById('rag-loader').style.display = 'none';
        
        localStorage.setItem('rag_keys', JSON.stringify(res.map));
@@ -1201,8 +1254,11 @@ window.deanonymiseRag = () => {
            const regex = new RegExp(escapeRegExp(fake), 'gi'); // Ignorer la casse pour le retour LLM
            llmText = llmText.replace(regex, real);
        }
-       document.getElementById('rag_llm_response').value = llmText;
-       alert("Désanonymisation terminée. Vos informations d'origine ont été réinsérées.");
+       
+       const cleanDiv = document.getElementById('rag-clean-text');
+       cleanDiv.innerText = llmText; // Use innerText to preserve line breaks safely
+       document.getElementById('rag-clean-result').style.display = 'block';
+       
    } catch(e) {
        console.error(e);
        alert("Erreur lors de la désanonymisation : " + e.message);
