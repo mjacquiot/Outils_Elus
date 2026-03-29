@@ -248,6 +248,7 @@ function renderAppLayout(content) {
         ${Permissions.canManageUsers(u) ? `<button class="btn btn-icon" onclick="navigate('users')" title="Administration Droits"><span class="material-icons-round">manage_accounts</span></button>` : ''}
         ${(!isP && Permissions.canManageCouncil(u)) ? `<button class="btn btn-icon" onclick="navigate('council')" title="Conseils"><span class="material-icons-round">calendar_month</span></button>` : ''}
         <div style="text-align:right; margin-left:1rem; margin-right:0.5rem;"><div style="font-size:0.75rem; font-weight:800; text-transform:uppercase;">${u.username}</div><div class="role-badge role-${isP ? 'elu' : u.role.toLowerCase()}" style="margin:0; padding:0.1rem 0.4rem; font-size:0.65rem;">${u.role}</div></div>
+        ${!isP ? `<button class="btn btn-icon" onclick="promptChangePassword()" title="Changer de mot de passe"><span class="material-icons-round">vpn_key</span></button>` : ''}
         <button class="btn btn-icon" onclick="logout()"><span class="material-icons-round">logout</span></button>
       </div>
     </header>
@@ -650,6 +651,22 @@ window.openSubject = (id) => { state.activeSubjectId = id; state.currentView = '
 window.openDoc = (id) => { state.activeDocId = id; render(); };
 window.closeDoc = () => { state.activeDocId = null; render(); };
 
+// --- SÉCURITÉ ---
+window.promptChangePassword = async () => {
+  const newPwd = prompt("Nouveau mot de passe (min 6 caractères) :");
+  if (!newPwd) return;
+  if (newPwd.length < 6) return alert("Le mot de passe doit faire au moins 6 caractères.");
+  
+  try {
+     const { data, error } = await supabaseClient.auth.updateUser({ password: newPwd });
+     if (error) alert("Erreur Supabase : " + error.message);
+     else alert("Votre mot de passe a bien été modifié !");
+  } catch(e) {
+     alert("Une erreur inattendue s'est produite.");
+     console.error(e);
+  }
+};
+
 // --- CRÉATION / GESTION DES DONNÉES ---
 window.promptCreateTheme = async () => {
   const title = prompt("Titre de la commission/thème :");
@@ -866,8 +883,26 @@ window.handleDocUpload = async (e, sid) => {
             textInfo.innerText = `Extraction PDF : Page ${i}/${pdf.numPages}`;
             const page = await pdf.getPage(i);
             const content = await page.getTextContent();
-            const strings = content.items.map(item => item.str);
-            fullText += strings.join(" ") + "\n";
+            const pageText = content.items.map(item => item.str).join(" ");
+            
+            if (pageText.trim().length < 20) {
+                 textInfo.innerText = `OCR de secours (Scan PDF) : Page ${i}/${pdf.numPages} en cours...`;
+                 const viewport = page.getViewport({scale: 1.5});
+                 const canvas = document.createElement("canvas");
+                 canvas.width = viewport.width;
+                 canvas.height = viewport.height;
+                 const renderContext = { canvasContext: canvas.getContext("2d"), viewport: viewport };
+                 await page.render(renderContext).promise;
+                 const imgData = canvas.toDataURL("image/jpeg");
+                 if (typeof Tesseract !== 'undefined') {
+                     const result = await Tesseract.recognize(imgData, 'fra', {
+                         logger: m => { if (m.status === "recognizing text") textInfo.innerText = `OCR Page ${i} : ${Math.round(m.progress * 100)}%`; }
+                     });
+                     fullText += result.data.text + "\n";
+                 }
+            } else {
+                 fullText += pageText + "\n";
+            }
         }
         textContent = fullText;
       } else if (['xls', 'xlsx'].includes(ext)) {
@@ -992,6 +1027,8 @@ window.renderRagIaView = () => {
      if(themeDocs.length > 0) allDocs.push({ theme: t, subjects: themeDocs });
   });
 
+  const validCouncils = state.councils.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0, 5);
+
   return `
     <div class="view-header">
       <h2><span class="material-icons-round" style="vertical-align:middle; color:var(--primary); font-size:2rem; margin-right:0.5rem;">smart_toy</span>IA & Rédaction Assistée (RAG)</h2>
@@ -1014,25 +1051,52 @@ window.renderRagIaView = () => {
          <div class="card" style="border:1px solid #e2e8f0; height:350px; display:flex; flex-direction:column;">
              <h3 style="margin-top:0; font-size:1.1rem; border-bottom:1px solid #f1f5f9; padding-bottom:0.5rem;">2. Documents à inclure dans le contexte IA</h3>
              <div style="flex:1; overflow-y:auto; font-size:0.9rem;">
-                ${allDocs.length === 0 ? '<p style="color:#94a3b8; font-style:italic;">Aucun document disponible. Uploadez des fichiers dans vos dossiers.</p>' : ''}
-                ${allDocs.map(t => `
+                ${validCouncils.length > 0 ? `
+                   <div style="margin-bottom:1.5rem; padding-bottom:1rem; border-bottom:1px dashed #cbd5e1;">
+                      <div style="font-weight:600; font-size:0.95rem; color:#f59e0b; margin-bottom:0.8rem;"><span class="material-icons-round" style="font-size:1.1rem; vertical-align:middle;">calendar_month</span> Conseils Communaux (5 derniers)</div>
+                      ${validCouncils.map(c => {
+                          const agIds = (c.agenda || []).map(a => typeof a === 'object' ? a.id : a);
+                          const dIds = state.subjects.filter(sb => agIds.includes(sb.id) && sb.docs).flatMap(sb => sb.docs.map(doc => doc.id));
+                          if(dIds.length === 0) return '';
+                          return `
+                             <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; margin-left:1rem; margin-bottom:0.5rem;">
+                                <input type="checkbox" onchange="toggleRagDocsByArray(this, [${dIds.join(',')}])">
+                                <span style="font-size:0.85rem; color:var(--text-main); font-weight:500;">Conseil du ${new Date(c.date).toLocaleDateString('fr-FR')} <span style="font-size:0.75rem; color:#94a3b8; font-weight:normal;">(${dIds.length} doc${dIds.length>1?'s':''})</span></span>
+                             </label>
+                          `;
+                      }).join('')}
+                   </div>
+                ` : ''}
+
+                ${allDocs.length === 0 ? '<p style="color:#94a3b8; font-style:italic;">Aucun document disponible. Uploadez des fichiers.</p>' : ''}
+                ${allDocs.map(t => {
+                   const themeDocsIds = t.subjects.flatMap(s => s.docs.map(d => d.id));
+                   return `
                    <div style="margin-bottom:1rem;">
-                     <div style="font-weight:600; color:var(--primary);">${sanitizeHTML(t.theme.title)}</div>
-                     ${t.subjects.map(s => `
-                        <div style="margin-left:1rem; margin-top:0.4rem;">
-                           <div style="font-weight:500; font-size:0.85rem; color:#475569;">↳ ${sanitizeHTML(s.subject.title)}</div>
+                     <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+                        <input type="checkbox" onchange="toggleRagDocsByArray(this, [${themeDocsIds.join(',')}])">
+                        <span style="font-weight:600; color:var(--primary);">${sanitizeHTML(t.theme.title)}</span>
+                     </label>
+                     ${t.subjects.map(s => {
+                        const subjDocsIds = s.docs.map(d => d.id);
+                        return `
+                        <div style="margin-left:1.5rem; margin-top:0.4rem;">
+                           <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+                              <input type="checkbox" onchange="toggleRagDocsByArray(this, [${subjDocsIds.join(',')}])">
+                              <span style="font-weight:500; font-size:0.85rem; color:#475569;">↳ ${sanitizeHTML(s.subject.title)}</span>
+                           </label>
                            <div style="margin-left:1.5rem; display:flex; flex-direction:column; gap:0.4rem; margin-top:0.4rem;">
                               ${s.docs.map(d => `
                                 <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
-                                   <input type="checkbox" class="rag-doc-cb" value="${d.id}" data-title="${sanitizeHTML(d.title)}">
+                                   <input type="checkbox" class="rag-doc-cb" id="rag-cb-${d.id}" value="${d.id}" data-title="${sanitizeHTML(d.title)}">
                                    <span style="font-size:0.85rem; color:var(--text-main);">${sanitizeHTML(d.title)}</span>
                                 </label>
                               `).join('')}
                            </div>
                         </div>
-                     `).join('')}
+                     `}).join('')}
                    </div>
-                `).join('')}
+                `}).join('')}
              </div>
          </div>
       </div>
@@ -1074,6 +1138,14 @@ window.saveRagSettings = async () => {
        await supabaseClient.from('profiles').update({ personal_context: pc }).eq('id', state.user.id);
    }
    alert("Paramètres de contexte IA sauvegardés !");
+};
+
+window.toggleRagDocsByArray = (el, idArray) => {
+   const isChecked = el.checked;
+   idArray.forEach(id => {
+       const box = document.getElementById('rag-cb-' + id);
+       if(box) box.checked = isChecked;
+   });
 };
 
 window.generateRagPrompt = async () => {
