@@ -54,7 +54,6 @@ let state = {
   tempRagDocs: [],
   aiChat: [],
   aiChatViewMode: 'clear',
-  uiFilterUsers: null,
   apiConfig: {
     active: localStorage.getItem('rag_api_active') || 'none',
     keys: {
@@ -71,22 +70,13 @@ async function syncFromSupabase() {
   try {
     // 1. Mise à jour du profil de l'utilisateur courant pour obtenir sa collectivité
     if (state.user && state.user.id) {
-      const { data: pData, error: pErr } = await supabaseClient.from('profiles').select('*').eq('id', state.user.id).single();
-      if (pErr) console.error("Erreur critique sur la lecture du Profil RLS:", pErr);
+      const { data: pData } = await supabaseClient.from('profiles').select('*').eq('id', state.user.id).single();
       if (pData) {
         state.user.role = pData.role;
-        if (state.user.role !== ROLES.SUPERADMIN) {
-           state.user.collectivite_id = pData.collectivite_id || null;
-        }
+        state.user.collectivite_id = pData.collectivite_id || null;
         state.user.username = pData.username;
         state.user.attachedThemes = pData.attached_themes || [];
       }
-    }
-
-    // Détermination de la collectivité ciblée (pour SuperAdmin il voit tout en global tout le temps)
-    let targetCol = state.user ? state.user.collectivite_id : null;
-    if (state.user && state.user.role === ROLES.SUPERADMIN) {
-        targetCol = null;
     }
 
     // 2. Construction des requêtes avec filtrage de cloisonnement (Multi-Tenancy)
@@ -97,12 +87,14 @@ async function syncFromSupabase() {
     let queryDocuments = supabaseClient.from('documents').select('*');
     let queryProfiles = supabaseClient.from('profiles').select('*');
 
-    // Le SUPERADMIN n'a pas de filtre global si targetCol est null.
-    if (targetCol) {
-      queryThemes = queryThemes.eq('collectivite_id', targetCol);
-      querySubjects = querySubjects.eq('collectivite_id', targetCol);
-      queryCouncils = queryCouncils.eq('collectivite_id', targetCol);
-      queryProfiles = queryProfiles.eq('collectivite_id', targetCol);
+    // Le SUPERADMIN n'a pas de filtre global (ou peut choisir). Tous les autres sont cloîtrés.
+    if (state.user && state.user.role !== ROLES.SUPERADMIN && state.user.collectivite_id) {
+      queryThemes = queryThemes.eq('collectivite_id', state.user.collectivite_id);
+      querySubjects = querySubjects.eq('collectivite_id', state.user.collectivite_id);
+      queryCouncils = queryCouncils.eq('collectivite_id', state.user.collectivite_id);
+      queryProfiles = queryProfiles.eq('collectivite_id', state.user.collectivite_id);
+      // Note : les documents et messages n'ont pas forcément collectivite_id dans la table actuellement,
+      // donc on les filtrera localement en fonction des sujets correspondants pour ne pas faire crasher la BDD s'ils n'ont pas la colonne.
     }
 
     const [
@@ -355,9 +347,15 @@ function renderSuperAdminDashboard() {
         </div>
         
         <div class="card" style="border:1px solid #e2e8f0; padding:2rem; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
-            <h3 style="margin:0 0 1rem 0; color:var(--text-main); display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round" style="color:#0ea5e9;">manage_search</span> Accès global complet</h3>
-            <p style="font-size:0.9rem; color:#64748b; margin-bottom:1.5rem;">Vous êtes en profil SuperAdmin "Mode Global". Vous avez donc accès sans restriction à toutes les données en simultané. Servez-vous du menu des rôles pour filtrer en direct par collectivité.</p>
-            <button class="btn btn-outline" style="width:100%; justify-content:center;" onclick="navigate('users')"><span class="material-icons-round">manage_accounts</span> Gérer les utilisateurs et filtrer</button>
+            <h3 style="margin:0 0 1rem 0; color:var(--text-main); display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round" style="color:#0ea5e9;">manage_search</span> Incarner une Collectivité</h3>
+            <p style="font-size:0.9rem; color:#64748b; margin-bottom:1.5rem;">Filtrez toute votre vue actuelle pour voir la base de données spécifique à une collectivité.</p>
+            
+            <select id="sa_col_viewer" style="width:100%; padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:0.95rem; margin-bottom:1rem;">
+                <option value="">-- Mode Global Silo (Tout voir) --</option>
+                ${collectivites.map(c => `<option value="${c}" ${state.user.collectivite_id === c ? 'selected' : ''}>${c}</option>`).join('')}
+            </select>
+            
+            <button class="btn btn-outline" style="width:100%; justify-content:center;" onclick="impersonateCollectivite()"><span class="material-icons-round">visibility</span> Filtrer l'application</button>
         </div>
     </div>
   `;
@@ -381,13 +379,12 @@ function renderDashboard() {
     return `
       <div class="card" style="display:flex; flex-direction:column; justify-content:space-between; position:relative;">
         <div style="display:flex; justify-content:space-between; align-items:start;">
-            <h3 style="margin-bottom:0.2rem; flex:1; cursor:pointer;" onclick="openTheme('${t.id}')">${sanitizeHTML(t.title)}</h3>
+            <h3 style="margin-bottom:0.2rem; flex:1; cursor:pointer;" onclick="openTheme(${t.id})">${sanitizeHTML(t.title)}</h3>
         </div>
-        ${state.user.role === ROLES.SUPERADMIN ? `<div style="font-size:0.75rem; color:#8b5cf6; font-weight:bold; margin-bottom:0.5rem; background:#ede9fe; display:inline-block; padding:0.1rem 0.4rem; border-radius:4px; width:fit-content;">🌍 ${t.collectivite_id || 'Globale (Aucune)'}</div>` : ''}
-        <p class="card-desc" style="flex:1; cursor:pointer;" onclick="openTheme('${t.id}')">${sanitizeHTML(t.desc)}</p>
+        <p class="card-desc" style="flex:1; cursor:pointer;" onclick="openTheme(${t.id})">${sanitizeHTML(t.desc)}</p>
         <div style="margin-top:1rem; display:flex; justify-content:space-between; align-items:center;">
             <span style="font-size:0.75rem; color:var(--text-muted); background:#f1f5f9; padding:0.2rem 0.5rem; border-radius:4px;">${subsCount} dossier(s)</span>
-            ${Permissions.canManageTheme(t, state.user) ? `<button class="btn btn-icon" style="color:#ef4444; padding:0; width:28px; height:28px;" onclick="deleteTheme(event, '${t.id}')" title="Supprimer ce Thème"><span class="material-icons-round" style="font-size:1.1rem;">delete_outline</span></button>` : ''}
+            ${Permissions.canManageTheme(t, state.user) ? `<button class="btn btn-icon" style="color:#ef4444; padding:0; width:28px; height:28px;" onclick="deleteTheme(event, ${t.id})" title="Supprimer ce Thème"><span class="material-icons-round" style="font-size:1.1rem;">delete_outline</span></button>` : ''}
         </div>
       </div>`;
   }).join('')}
@@ -622,27 +619,9 @@ function renderCouncilManagement() {
 }
 
 function renderUsersManagement() {
-  const displayedUsers = (state.user.role === ROLES.SUPERADMIN && state.uiFilterUsers) 
-      ? state.users.filter(u => u.collectivite_id === state.uiFilterUsers) 
-      : state.users;
-
-  return `
-    <div class="view-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
-      <div style="flex:1;">
-        <h2 style="margin:0 0 0.5rem 0;">Administration : Utilisateurs et Accès</h2>
-        <p style="color:var(--text-muted); margin:0;">Gestion des profils de la base de données Supabase.</p>
-      </div>
-      ${state.user.role === ROLES.SUPERADMIN ? `
-      <div>
-        <select onchange="state.uiFilterUsers = this.value; render();" style="padding:0.6rem 1rem; border-radius:8px; border:1px solid #cbd5e1; font-weight:600; outline:none; background:white; color:var(--primary); font-size:0.95rem; cursor:pointer;">
-           <option value="">🌍 Toutes les collectivités</option>
-           ${[...new Set(state.users.map(u => u.collectivite_id).filter(Boolean))].map(c => `<option value="${c}" ${state.uiFilterUsers === c ? 'selected' : ''}>📌 ${c}</option>`).join('')}
-        </select>
-      </div>
-      ` : ''}
-    </div>
+  return `<div class="view-header"><h2>Administration : Utilisateurs et Accès</h2><p style="color:var(--text-muted);">Gestion des profils de la base de données Supabase.</p></div>
   <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:1.5rem;">
-  ${displayedUsers.map(u => {
+  ${state.users.map(u => {
     return `
     <div class="card" style="border:1px solid #e2e8f0; display:flex; flex-direction:column;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
@@ -790,19 +769,18 @@ window.createCollectiviteAdmin = async () => {
   }
 };
 
-// L'impersonation directe disparait, remplacée par le target global
 window.impersonateCollectivite = async () => {
+  const colId = document.getElementById('sa_col_viewer').value;
+  state.user.collectivite_id = colId || null; // Si vide, on voit tout.
+  await syncFromSupabase();
   render();
 };
 
 window.deleteTheme = async (e, tid) => {
   e.stopPropagation();
   if (confirm("ATTENTION: Êtes-vous sûr de vouloir archiver/supprimer ce thème et le faire disparaître du tableau de bord ?")) {
-    const { error } = await supabaseClient.from('themes').update({ is_archived: true }).eq('id', tid);
-    if (error) {
-       console.error(error);
-       alert("Erreur base de données (RLS) : Impossible de supprimer ce thème. Vérifiez vos droits Supabase. Message: " + error.message);
-    }
+    await supabaseClient.from('themes').update({ is_archived: true }).eq('id', tid);
+    renderDashboard();
     await syncFromSupabase();
     render();
   }
@@ -1530,11 +1508,11 @@ window.startScraping = async () => {
     // On crée un Theme spécifique
     const themeTitle = "Fonds Documentaire - " + cityInput;
     const { data: themeData } = await supabaseClient.from('themes').insert({ title: themeTitle, description: "Scraping automatisé. Source: " + urlInput + " & État", collectivite_id: state.user.collectivite_id }).select();
-    const themeId = themeData?.[0]?.id || Date.now();
+    const themeId = themeData[0]?.id || Date.now();
 
     // Un sujet général
     const { data: subjData } = await supabaseClient.from('subjects').insert({ theme_id: themeId, title: "Archive Web Automatique", description: "Documents aspirés", is_confidential: false, collectivite_id: state.user.collectivite_id }).select();
-    const subjId = subjData?.[0]?.id || Date.now();
+    const subjId = subjData[0]?.id || Date.now();
 
     for (let i = 0; i < absPdfs.length; i++) {
       details.innerText = `Traitement: ${absPdfs[i]} (${i + 1}/${absPdfs.length})`;
