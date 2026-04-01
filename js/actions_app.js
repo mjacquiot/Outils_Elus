@@ -943,18 +943,18 @@ window.renderScraperView = () => {
 };
 
 // Utilitaire proxy CORS - Approche multi-couches
-window._fetchViaProxy = async (url) => {
-  // Couche 1: Essai direct (certains sites ont des CORS permissifs)
+window._fetchViaProxy = async (url, isBinary = false) => {
+  // Couche 1: Essai direct
   try {
     const resp = await fetch(url, { signal: AbortSignal.timeout(8000), mode: 'cors' });
-    if (resp.ok) return await resp.text();
-  } catch(e) { /* CORS bloqué, normal */ }
+    if (resp.ok) return isBinary ? await resp.arrayBuffer() : await resp.text();
+  } catch(e) { /* CORS bloqué */ }
 
-  // Couche 2: Supabase Edge Function (si déployée)
+  // Couche 2: Supabase Edge Function (La plus fiable)
   if (typeof supabaseClient !== 'undefined') {
     try {
       const { data: { session } } = await supabaseClient.auth.getSession();
-      const supaUrl = supabaseClient.supabaseUrl || state?.supabaseUrl;
+      const supaUrl = state?.supabaseUrl;
       if (supaUrl) {
         const resp = await fetch(supaUrl + '/functions/v1/cors-proxy', {
           method: 'POST',
@@ -963,34 +963,25 @@ window._fetchViaProxy = async (url) => {
             'Authorization': 'Bearer ' + (session?.access_token || ''),
           },
           body: JSON.stringify({ url }),
-          signal: AbortSignal.timeout(20000)
+          signal: AbortSignal.timeout(60000) // 60s pour les gros PDF
         });
-        if (resp.ok) return await resp.text();
+        if (resp.ok) return isBinary ? await resp.arrayBuffer() : await resp.text();
       }
     } catch(e) { console.warn("Edge Function proxy failed:", e.message); }
   }
 
-  // Couche 3: Proxys CORS publics avec fallback
+  // Couche 3: Fallbacks publics
   const proxies = [
     (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
     (u) => 'https://corsproxy.io/?' + encodeURIComponent(u),
-    (u) => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
-    (u) => 'https://proxy.cors.sh/' + u,
   ];
   for (const proxyFn of proxies) {
     try {
-      const proxyUrl = proxyFn(url);
-      const resp = await fetch(proxyUrl, { 
-        signal: AbortSignal.timeout(12000),
-        headers: { 'x-cors-api-key': 'temp_' + Date.now() } // certains proxys l'exigent
-      });
-      if (resp.ok) {
-        const text = await resp.text();
-        if (text && text.length > 100) return text; // Vérifier que c'est pas une page d'erreur
-      }
+      const resp = await fetch(proxyFn(url), { signal: AbortSignal.timeout(30000) });
+      if (resp.ok) return isBinary ? await resp.arrayBuffer() : await resp.text();
     } catch(e) { continue; }
   }
-  throw new Error("Tous les proxys CORS ont échoué pour: " + url);
+  throw new Error("Échec de connexion (Proxy) pour: " + url);
 };
 
 window.startScraping = async () => {
@@ -1093,11 +1084,7 @@ window.startScraping = async () => {
 
       let textContent = "";
       try {
-        const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(pdfUrl);
-        const pdfResp = await fetch(proxyUrl, { signal: AbortSignal.timeout(30000) });
-        if (!pdfResp.ok) throw new Error("HTTP " + pdfResp.status);
-
-        const buf = await pdfResp.arrayBuffer();
+        const buf = await window._fetchViaProxy(pdfUrl, true);
         const pdf = await pdfjsLib.getDocument(buf).promise;
 
         for (let p = 1; p <= Math.min(pdf.numPages, 15); p++) {

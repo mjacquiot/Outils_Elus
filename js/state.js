@@ -42,6 +42,7 @@ let state = {
   activeDocId: null,
   expandedCouncilId: null,
   publicVotedStatus: {},
+  supabaseUrl: supabaseUrl,
 
   themes: [],
   subjects: [],

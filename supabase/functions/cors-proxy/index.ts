@@ -1,6 +1,4 @@
-// Supabase Edge Function - CORS Proxy pour le scraper EluConnect
-// Déployez avec: npx supabase functions deploy cors-proxy
-
+// Supabase Edge Function - CORS Proxy v2 (Binary Friendly)
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -10,61 +8,37 @@ const corsHeaders = {
 }
 
 serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
     const { url } = await req.json()
-    
-    if (!url || typeof url !== 'string') {
-      return new Response(JSON.stringify({ error: 'URL manquante' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
-    }
+    if (!url) throw new Error('URL manquante')
 
-    // Validate URL
-    const parsed = new URL(url)
-    if (!['http:', 'https:'].includes(parsed.protocol)) {
-      return new Response(JSON.stringify({ error: 'Protocole non supporté' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
-    }
+    console.log(`Proxying request to: ${url}`)
 
-    // Fetch the target URL from the server side (no CORS restrictions)
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
       },
       redirect: 'follow',
     })
 
-    const contentType = response.headers.get('content-type') || 'text/html'
-    
-    // For binary content (PDFs), return as ArrayBuffer
-    if (contentType.includes('application/pdf') || url.toLowerCase().endsWith('.pdf')) {
-      const buffer = await response.arrayBuffer()
-      return new Response(buffer, {
-        status: 200,
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/pdf',
-        }
+    if (!response.ok) {
+      return new Response(`Error ${response.status}: ${response.statusText}`, { 
+        status: response.status, 
+        headers: corsHeaders 
       })
     }
 
-    // For text content (HTML), return as text
-    const text = await response.text()
-    return new Response(text, {
+    const contentType = response.headers.get('content-type') || ''
+    const buffer = await response.arrayBuffer()
+
+    return new Response(buffer, {
       status: 200,
       headers: {
         ...corsHeaders,
         'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=3600'
       }
     })
 
