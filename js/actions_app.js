@@ -5,9 +5,8 @@ window.handleLogin = async (e) => {
   const passV = document.getElementById('login-pass').value;
 
   let email = userV;
-  // Traduire le username 'admin' en 'admin@admin.com' si renseigné ainsi.
-  if (userV === 'admin' && !userV.includes('@')) {
-    email = 'admin@admin.com';
+  if (!email.includes('@')) {
+    email = email + '@admin.com';
   }
 
   if (!email || !passV) {
@@ -16,7 +15,6 @@ window.handleLogin = async (e) => {
 
   try {
     console.log("Supabase Auth Attempt with:", email);
-    // Supabase sign in logic
     const { data, error } = await supabaseClient.auth.signInWithPassword({
       email: email,
       password: passV,
@@ -26,7 +24,6 @@ window.handleLogin = async (e) => {
       console.error(error);
       alert("Authentification échouée : " + error.message);
     } else {
-      // Real Supabase succes. Setup minimal user, then sync accurately captures role
       state.user = { id: data.user.id, email: data.user.email, username: data.user.email.split('@')[0], role: ROLES.ELU, attachedThemes: [] };
       await syncFromSupabase();
       state.currentView = 'dashboard';
@@ -35,6 +32,79 @@ window.handleLogin = async (e) => {
   } catch (e) {
     console.error(e);
     alert("Authentification échouée / Impossible de contacter le serveur.");
+  }
+};
+
+// --- AUTO-INSCRIPTION ---
+window.checkRegistrationEligibility = async () => {
+  const email = document.getElementById('reg-email').value.trim().toLowerCase();
+  if (!email || !email.includes('@')) return alert("Veuillez entrer une adresse email valide.");
+  const errDiv = document.getElementById('register-error');
+  errDiv.style.display = 'none';
+
+  try {
+    const { data, error } = await supabaseClient.from('allowed_registrations')
+      .select('*').eq('email', email).is('used_at', null).limit(1);
+
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      errDiv.style.display = 'block';
+      errDiv.innerHTML = '<span class="material-icons-round" style="font-size:1.2rem; vertical-align:middle;">block</span> Cet email n\'est pas pré-autorisé. Contactez votre administrateur pour obtenir une invitation.';
+      return;
+    }
+
+    const reg = data[0];
+    window._pendingReg = reg;
+    document.getElementById('register-step1').style.display = 'none';
+    document.getElementById('register-step2').style.display = 'flex';
+    document.getElementById('reg-auth-info').innerText = `Autorisé ! Collectivité: ${reg.collectivite_id} — Rôle: ${reg.role}`;
+    if (reg.full_name) document.getElementById('reg-fullname').value = reg.full_name;
+  } catch (err) {
+    console.error(err);
+    errDiv.style.display = 'block';
+    errDiv.innerText = 'Erreur de vérification : ' + err.message;
+  }
+};
+
+window.handleSelfRegister = async () => {
+  const reg = window._pendingReg;
+  if (!reg) return alert('Erreur: aucune pré-autorisation trouvée. Recommencez.');
+  const email = document.getElementById('reg-email').value.trim().toLowerCase();
+  const fullName = document.getElementById('reg-fullname').value.trim();
+  const pwd = document.getElementById('reg-password').value;
+  const pwd2 = document.getElementById('reg-password2').value;
+  const errDiv = document.getElementById('register-error');
+  errDiv.style.display = 'none';
+
+  if (!fullName) return alert('Veuillez renseigner votre nom complet.');
+  if (!pwd || pwd.length < 6) return alert('Le mot de passe doit faire au moins 6 caractères.');
+  if (pwd !== pwd2) return alert('Les mots de passe ne correspondent pas.');
+
+  try {
+    const { data, error } = await supabaseClient.auth.signUp({
+      email: email,
+      password: pwd,
+      options: {
+        data: {
+          username: fullName,
+          role: reg.role,
+          collectivite_id: reg.collectivite_id
+        }
+      }
+    });
+
+    if (error) throw error;
+
+    // Marquer la pré-autorisation comme utilisée
+    await supabaseClient.from('allowed_registrations').update({ used_at: new Date().toISOString() }).eq('id', reg.id);
+
+    alert('Compte créé avec succès ! Vous pouvez maintenant vous connecter avec votre email et mot de passe.');
+    window._pendingReg = null;
+    navigate('login');
+  } catch (err) {
+    console.error(err);
+    errDiv.style.display = 'block';
+    errDiv.innerText = 'Erreur de création : ' + err.message;
   }
 };
 
@@ -58,9 +128,9 @@ window.logout = async () => {
   render();
 };
 window.navigate = (view) => { state.currentView = view; render(); };
-window.openTheme = (id) => { state.activeThemeId = id; state.currentView = 'theme'; render(); };
-window.openSubject = (id) => { state.activeSubjectId = id; state.currentView = 'subject'; render(); };
-window.openDoc = (id) => { state.activeDocId = id; render(); };
+window.openTheme = (id) => { state.activeThemeId = isNaN(id) ? id : Number(id); state.currentView = 'theme'; render(); };
+window.openSubject = (id) => { state.activeSubjectId = isNaN(id) ? id : Number(id); state.currentView = 'subject'; render(); };
+window.openDoc = (id) => { state.activeDocId = isNaN(id) ? id : Number(id); render(); };
 window.closeDoc = () => { state.activeDocId = null; render(); };
 
 // --- SUPERADMIN FUNCTIONS ---
@@ -184,44 +254,64 @@ window.deleteSubject = async (e, sid) => {
   }
 }
 
-window.promptCreateUser = async () => {
-  const email = prompt("Email du nouvel utilisateur (ou identifiant) :");
-  if (!email) return;
-  const password = prompt("Mot de passe temporaire pour cet utilisateur (min 6 caractères) :");
-  if (!password || password.length < 6) return alert("Mot de passe trop court ou manquant.");
+window.promptPreAuthorize = async () => {
+  const email = prompt("Email de l'utilisateur à pré-autoriser :");
+  if (!email || !email.includes('@')) return alert("Email invalide.");
+  const fullName = prompt("Nom complet de l'utilisateur (optionnel) :") || '';
 
-  const proceed = confirm("ATTENTION : Pour des raisons de sécurité imposées par Supabase, vous allez être déconnecté juste après la création pour laisser la place au nouveau compte.\n\nÊtes-vous sûr de vouloir créer ce compte maintenant ?");
-  if (!proceed) return;
+  const roleChoices = Object.values(ROLES).filter(r => r !== ROLES.SUPERADMIN);
+  const roleStr = prompt(`Rôle à attribuer (${roleChoices.join(', ')}) :`, ROLES.ELU);
+  const role = roleChoices.includes(roleStr) ? roleStr : ROLES.ELU;
+
+  const colId = state.user.role === ROLES.SUPERADMIN
+    ? (prompt('ID Collectivité :') || state.user.collectivite_id)
+    : state.user.collectivite_id;
+
+  if (!colId) return alert('Collectivité manquante.');
 
   try {
-    const { data, error } = await supabaseClient.auth.signUp({
-      email: email,
-      password: password,
-      options: {
-        data: {
-          username: email.split('@')[0],
-          role: ROLES.ELU,
-          collectivite_id: state.user.collectivite_id
-        }
-      }
+    const { error } = await supabaseClient.from('allowed_registrations').insert({
+      email: email.toLowerCase().trim(),
+      role: role,
+      collectivite_id: colId,
+      full_name: fullName || null,
+      created_by: state.user.id
     });
 
     if (error) {
-      alert("Erreur Supabase : " + error.message);
-    } else {
-      if (data.user) {
-        try {
-          await supabaseClient.from('profiles').upsert({ id: data.user.id, email: email, username: email.split('@')[0], role: ROLES.ELU, collectivite_id: state.user.collectivite_id });
-        } catch (e) { }
-      }
-      alert(`Compte ${email} créé pour cette collectivité !\nLe mot de passe temporaire est : ${password}\n\nVous êtes maintenant déconnecté. Veuillez vous reconnecter.`);
-      await window.logout();
+      if (error.code === '23505') return alert('Cet email est déjà pré-autorisé.');
+      throw error;
     }
+
+    alert(`L'utilisateur ${email} est maintenant pré-autorisé avec le rôle "${role}" pour la collectivité "${colId}".\n\nIl pourra créer son compte depuis la page de connexion.`);
+    await loadPendingRegistrations();
+    render();
   } catch (err) {
     console.error(err);
-    alert("Une erreur inattendue est survenue.");
+    alert('Erreur : ' + err.message);
   }
-}
+};
+
+window.revokePreAuth = async (regId) => {
+  if (!confirm('Révoquer cette pré-autorisation ?')) return;
+  await supabaseClient.from('allowed_registrations').delete().eq('id', regId);
+  await loadPendingRegistrations();
+  render();
+};
+
+window.loadPendingRegistrations = async () => {
+  try {
+    let query = supabaseClient.from('allowed_registrations').select('*').is('used_at', null);
+    if (state.user.role !== ROLES.SUPERADMIN && state.user.collectivite_id) {
+      query = query.eq('collectivite_id', state.user.collectivite_id);
+    }
+    const { data } = await query;
+    state.pendingRegistrations = data || [];
+  } catch(e) {
+    console.warn('Impossible de charger les pré-autorisations:', e);
+    state.pendingRegistrations = [];
+  }
+};
 
 window.importMassUsers = async (e) => {
   const file = e.target.files[0];
@@ -232,22 +322,21 @@ window.importMassUsers = async (e) => {
       const reader = new FileReader();
       reader.onload = ev => resolve(ev.target.result);
       reader.onerror = reject;
-      reader.readAsText(file, 'windows-1252'); // Excel compatibility
+      reader.readAsText(file, 'windows-1252');
     });
 
     const lines = text.split('\n').filter(l => l.trim() !== '');
     if (lines.length < 2) throw new Error("Le fichier est vide ou manque d'en-tête (au moins 2 lignes).");
 
-    const usersToCreate = [];
+    const regsToCreate = [];
     
-    // Convention métier: Col 0 = Nom, Col 1 = Prénom, Col 2 = Email, Col 3 (Opt) = Rôle
+    // Convention: Col 0 = Nom, Col 1 = Prénom, Col 2 = Email, Col 3 (Opt) = Rôle
     for(let i = 1; i < lines.length; i++) {
         const cells = lines[i].split(/[,;]/).map(c => c.trim().replace(/^["']|["']$/g, ''));
-        // We consider valid if cell 2 contains an @
         if (cells.length >= 3 && cells[2].includes('@')) {
             const nom = cells[0];
             const prenom = cells[1];
-            const email = cells[2].toLowerCase();
+            const email = cells[2].toLowerCase().trim();
             let rawRole = cells[3] ? cells[3].toLowerCase() : 'elu';
             
             let r = ROLES.ELU;
@@ -257,30 +346,28 @@ window.importMassUsers = async (e) => {
             else if (rawRole.includes('delegue') || rawRole.includes('délégué')) r = ROLES.DELEGUE;
             else if (rawRole.includes('technicien') || rawRole.includes('tech')) r = ROLES.TECHNICIEN;
 
-            usersToCreate.push({
-               id: crypto.randomUUID(), // ID temporaire (Supabase auth.users non impliqué encore)
+            regsToCreate.push({
                email: email,
-               username: `${prenom} ${nom}`,
+               full_name: `${prenom} ${nom}`,
                role: r,
                collectivite_id: state.user.collectivite_id,
-               attached_themes: []
+               created_by: state.user.id
             });
         }
     }
 
-    if (usersToCreate.length === 0) return alert("Aucun utilisateur valide trouvé. Vérifiez que la colonne 3 contient bien des emails pour chaque ligne.");
+    if (regsToCreate.length === 0) return alert("Aucun utilisateur valide trouvé. Vérifiez que la colonne 3 contient bien des emails.");
 
-    if (confirm(`${usersToCreate.length} comptes sont en attente d'import pour la collectivité ${state.user.collectivite_id}.\nLes profils apparaîtront dans la liste. Les utilisateurs n'auront qu'à "s'inscrire/se connecter" depuis le portail avec le même email pour lier le compte de sécurité.\n\nÊtes vous sûr ?`)) {
+    if (confirm(`${regsToCreate.length} pré-autorisations vont être créées pour la collectivité "${state.user.collectivite_id}".\n\nLes utilisateurs pourront s'inscrire eux-mêmes depuis la page de connexion avec leur email.\n\nConfirmer ?`)) {
         
-        const { error } = await supabaseClient.from('profiles').insert(usersToCreate);
+        const { error } = await supabaseClient.from('allowed_registrations').insert(regsToCreate);
         if (error) {
-           // Possible duplicate email checking
-           if (error.code === '23505') throw new Error("Certains emails existent déjà dans la base.");
+           if (error.code === '23505') throw new Error("Certains emails sont déjà pré-autorisés.");
            throw error;
         }
         
-        alert(`Succès ! Les profils ont été créés.`);
-        await syncFromSupabase();
+        alert(`Succès ! ${regsToCreate.length} pré-autorisations créées.`);
+        await loadPendingRegistrations();
         render();
     }
 
@@ -288,7 +375,7 @@ window.importMassUsers = async (e) => {
     console.error(err);
     alert("Erreur d'import massif : " + err.message);
   } finally {
-    e.target.value = ''; // Reset the input file
+    e.target.value = '';
   }
 };
 
@@ -803,7 +890,7 @@ window.renderScraperView = () => {
   return `
     <div class="view-header">
       <h2 style="display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round" style="color:#0ea5e9; font-size:2.5rem; filter:drop-shadow(0 4px 3px rgb(0 0 0 / 0.07));">cloud_download</span>Scraping & Fonds Documentaire</h2>
-      <p style="color:var(--text-muted); font-size:1.05rem;">Récupérez massivement des documents publics depuis un site web de mairie ou institution pour enrichir la base de connaissances.</p>
+      <p style="color:var(--text-muted); font-size:1.05rem;">Récupérez les documents PDF publics (PV de conseils, délibérations...) depuis le site internet d'une commune.</p>
     </div>
     
     <div style="display:flex; flex-direction:column; gap:2rem; max-width:800px;">
@@ -812,32 +899,37 @@ window.renderScraperView = () => {
             
             <div style="display:flex; flex-direction:column; gap:1.5rem;">
                <div>
-                  <label style="font-weight:600; font-size:0.95rem; margin-bottom:0.5rem; display:block; color:#334155;">URL du site internet (ex: https://www.paris.fr)</label>
+                  <label style="font-weight:600; font-size:0.95rem; margin-bottom:0.5rem; display:block; color:#334155;">URL du site internet (ex: https://www.dunieres.fr)</label>
                   <input type="url" id="scrap_url" placeholder="https://" style="width:100%; padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;">
                </div>
-               
-               <div style="text-align:center; position:relative; margin:1rem 0;">
-                  <hr style="border:0; border-top:1px dashed #cbd5e1; margin:0;">
-                  <span style="position:absolute; top:-10px; left:50%; transform:translateX(-50%); background:white; padding:0 1rem; color:#94a3b8; font-size:0.8rem; font-weight:bold;">ET</span>
-               </div>
-               
                <div>
-                  <label style="font-weight:600; font-size:0.95rem; margin-bottom:0.5rem; display:block; color:#334155;">Recherche par Commune + Code Postal</label>
-                  <input type="text" id="scrap_city" placeholder="ex: Lyon 69000 documents publics" style="width:100%; padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;">
+                  <label style="font-weight:600; font-size:0.95rem; margin-bottom:0.5rem; display:block; color:#334155;">Nom du dossier à créer (ex: Dunières 43220)</label>
+                  <input type="text" id="scrap_city" placeholder="Nom de la commune" style="width:100%; padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;">
+               </div>
+               <div style="display:flex; gap:1rem; align-items:center;">
+                  <label style="font-size:0.9rem; color:#475569; display:flex; align-items:center; gap:0.5rem;">
+                    <input type="number" id="scrap_depth" value="2" min="1" max="4" style="width:60px; padding:0.5rem; border-radius:6px; border:1px solid #cbd5e1; text-align:center;">
+                    Profondeur d'exploration (niveaux de sous-pages)
+                  </label>
+                  <label style="font-size:0.9rem; color:#475569; display:flex; align-items:center; gap:0.5rem;">
+                    <input type="number" id="scrap_max" value="50" min="5" max="200" style="width:70px; padding:0.5rem; border-radius:6px; border:1px solid #cbd5e1; text-align:center;">
+                    Max pages explorées
+                  </label>
                </div>
             </div>
             
             <div style="margin-top:2rem;">
-               <button class="btn btn-primary" onclick="startScraping()" style="width:100%; justify-content:center; padding:1rem; font-size:1.1rem; background:linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%);"><span class="material-icons-round" style="margin-right:0.5rem;">find_replace</span> Lancer l'exploration et l'extraction locale</button>
+               <button class="btn btn-primary" onclick="startScraping()" style="width:100%; justify-content:center; padding:1rem; font-size:1.1rem; background:linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%);"><span class="material-icons-round" style="margin-right:0.5rem;">find_replace</span> Lancer l'exploration récursive</button>
             </div>
             
             <div id="scrap_loader" style="display:none; text-align:center; margin-top:2rem; padding:1.5rem; background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px;">
                <div class="spinner" style="width:30px;height:30px;border-top-color:#0284c7; border-width:3px; margin:0 auto 1rem auto;"></div>
-               <div id="scrap_status" style="font-weight:600; color:#0369a1;">Connexion en cours via Proxy API...</div>
-               <div id="scrap_details" style="font-size:0.85rem; color:#0284c7; margin-top:0.5rem;">Ceci peut prendre plusieurs minutes selon la taille du site.</div>
+               <div id="scrap_status" style="font-weight:600; color:#0369a1;">Connexion en cours...</div>
+               <div id="scrap_details" style="font-size:0.85rem; color:#0284c7; margin-top:0.5rem;"></div>
                <div id="scrap_progress_bar" style="height:6px; background:#e0f2fe; border-radius:3px; overflow:hidden; margin-top:1rem; width:100%;">
                    <div style="height:100%; width:0%; background:#0284c7; transition:width 0.3s;" id="scrap_progress_fill"></div>
                </div>
+               <div id="scrap_found_list" style="text-align:left; margin-top:1rem; max-height:200px; overflow-y:auto; font-size:0.8rem; color:#475569;"></div>
             </div>
 
             <div id="scrap_results" style="display:none; margin-top:2rem; padding:1.5rem; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
@@ -850,140 +942,194 @@ window.renderScraperView = () => {
   `;
 };
 
+// Utilitaire proxy CORS - Approche multi-couches
+window._fetchViaProxy = async (url) => {
+  // Couche 1: Essai direct (certains sites ont des CORS permissifs)
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(8000), mode: 'cors' });
+    if (resp.ok) return await resp.text();
+  } catch(e) { /* CORS bloqué, normal */ }
+
+  // Couche 2: Supabase Edge Function (si déployée)
+  if (typeof supabaseClient !== 'undefined') {
+    try {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const supaUrl = supabaseClient.supabaseUrl || state?.supabaseUrl;
+      if (supaUrl) {
+        const resp = await fetch(supaUrl + '/functions/v1/cors-proxy', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + (session?.access_token || ''),
+          },
+          body: JSON.stringify({ url }),
+          signal: AbortSignal.timeout(20000)
+        });
+        if (resp.ok) return await resp.text();
+      }
+    } catch(e) { console.warn("Edge Function proxy failed:", e.message); }
+  }
+
+  // Couche 3: Proxys CORS publics avec fallback
+  const proxies = [
+    (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+    (u) => 'https://corsproxy.io/?' + encodeURIComponent(u),
+    (u) => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
+    (u) => 'https://proxy.cors.sh/' + u,
+  ];
+  for (const proxyFn of proxies) {
+    try {
+      const proxyUrl = proxyFn(url);
+      const resp = await fetch(proxyUrl, { 
+        signal: AbortSignal.timeout(12000),
+        headers: { 'x-cors-api-key': 'temp_' + Date.now() } // certains proxys l'exigent
+      });
+      if (resp.ok) {
+        const text = await resp.text();
+        if (text && text.length > 100) return text; // Vérifier que c'est pas une page d'erreur
+      }
+    } catch(e) { continue; }
+  }
+  throw new Error("Tous les proxys CORS ont échoué pour: " + url);
+};
+
 window.startScraping = async () => {
   const urlInput = document.getElementById('scrap_url').value.trim();
   const cityInput = document.getElementById('scrap_city').value.trim();
+  const maxDepth = parseInt(document.getElementById('scrap_depth').value) || 2;
+  const maxPages = parseInt(document.getElementById('scrap_max').value) || 50;
 
-  if (!urlInput || !cityInput) return alert("Veuillez remplir l'URL de la mairie ET la commune (Nom + Code Postal).");
+  if (!urlInput) return alert("Veuillez remplir l'URL du site.");
+  if (!cityInput) return alert("Veuillez donner un nom pour le dossier de la commune.");
+
+  let baseUrl;
+  try { baseUrl = new URL(urlInput); } catch(e) { return alert("URL invalide."); }
+  const origin = baseUrl.origin;
 
   document.getElementById('scrap_loader').style.display = 'block';
   document.getElementById('scrap_results').style.display = 'none';
   const fill = document.getElementById('scrap_progress_fill');
   const status = document.getElementById('scrap_status');
   const details = document.getElementById('scrap_details');
+  const foundList = document.getElementById('scrap_found_list');
+
+  const visited = new Set();
+  const pdfLinks = new Set();
+  const queue = [{ url: urlInput, depth: 0 }];
+  // Keywords that signal council-related pages
+  const keywords = ['conseil', 'municipal', 'deliber', 'proces-verbal', 'compte-rendu', 'seance', 'pv', 'communaute', 'assembl'];
 
   try {
-    fill.style.width = '10%';
-    status.innerText = "Recherche des ressources Web...";
-    let absPdfs = [];
+    // Phase 1: Recursive crawl
+    while (queue.length > 0 && visited.size < maxPages) {
+      const { url: currentUrl, depth } = queue.shift();
+      const normalizedUrl = currentUrl.split('#')[0].split('?')[0];
+      if (visited.has(normalizedUrl)) continue;
+      visited.add(normalizedUrl);
 
-    // 1. Scrap site web Mairie
-    fill.style.width = '20%';
-    status.innerText = "Analyse de " + urlInput;
-    details.innerText = "Recherche de documents PDF sur le site officiel de la commune...";
-    try {
-      // Utilisation de corsproxy brut (HTML) avec tolérance sur l'extension .pdf (ex: .pdf?v=2)
-      const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(urlInput);
-      const resp = await fetch(proxyUrl);
-      const html = await resp.text();
+      const progress = Math.min(70, (visited.size / maxPages) * 70);
+      fill.style.width = progress + '%';
+      status.innerText = `Exploration page ${visited.size}/${maxPages} (profondeur ${depth}/${maxDepth})`;
+      details.innerText = currentUrl.substring(0, 80) + (currentUrl.length > 80 ? '...' : '');
 
-      const pdfMatches = [...new Set((html.match(/href=["']([^"']*\.pdf[^"']*)["']/gi) || []).map(s => {
-        let inner = s.replace(/href=["']/i, '');
-        return inner.substring(0, inner.length - 1);
-      }))];
+      try {
+        const html = await window._fetchViaProxy(currentUrl);
 
-      pdfMatches.forEach(p => {
-        let absLink = p;
-        if (p.startsWith('//')) absLink = 'https:' + p;
-        else if (p.startsWith('/')) {
-          try { absLink = new URL(urlInput).origin + p; } catch (e) { absLink = urlInput + p; }
+        // Extract all href links
+        const hrefRegex = /href=["']([^"'#]+)["']/gi;
+        let match;
+        while ((match = hrefRegex.exec(html)) !== null) {
+          let link = match[1].replace(/&amp;/g, '&').trim();
+          
+          // Resolve relative URLs
+          if (link.startsWith('//')) link = baseUrl.protocol + link;
+          else if (link.startsWith('/')) link = origin + link;
+          else if (!link.startsWith('http')) link = currentUrl.replace(/[^/]*$/, '') + link;
+
+          // Is it a PDF?
+          if (link.toLowerCase().match(/\.pdf(\?.*)?$/)) {
+            if (!pdfLinks.has(link)) {
+              pdfLinks.add(link);
+              foundList.innerHTML += `<div style="padding:0.2rem 0; border-bottom:1px solid #f1f5f9;">📄 ${link.split('/').pop().substring(0,50)}</div>`;
+            }
+            continue;
+          }
+
+          // Queue internal pages for deeper crawl
+          if (depth < maxDepth && link.startsWith(origin) && !visited.has(link.split('#')[0].split('?')[0])) {
+            const linkLower = link.toLowerCase();
+            // Prioritize pages likely to contain council documents
+            const isPriority = keywords.some(kw => linkLower.includes(kw));
+            if (isPriority) {
+              queue.unshift({ url: link, depth: depth + 1 }); // Priority: front of queue
+            } else {
+              queue.push({ url: link, depth: depth + 1 });
+            }
+          }
         }
-        else if (!p.startsWith('http')) absLink = urlInput + (urlInput.endsWith('/') ? '' : '/') + p;
-        absPdfs.push(absLink);
-      });
-    } catch (e) {
-      console.warn("Échec de l'exploration du site de la mairie:", e);
+      } catch(e) {
+        console.warn("Échec exploration page:", currentUrl, e.message);
+      }
     }
 
-    // 2. Recherche documents d'état
-    fill.style.width = '40%';
-    status.innerText = "Recherche documents d'État...";
-    details.innerText = "Recherche institutionnelle (Gouv, Légifrance) pour : " + cityInput;
-    try {
-      // Bing est généralement bien plus tolérant envers les proxys/scrapers grand public
-      const query = encodeURIComponent(cityInput + ' filetype:pdf (site:gouv.fr OR site:legifrance.gouv.fr)');
-      const searchUrl = 'https://corsproxy.io/?' + encodeURIComponent('https://www.bing.com/search?q=' + query);
+    const absPdfs = [...pdfLinks].slice(0, 30); // Max 30 PDFs
 
-      const sr = await fetch(searchUrl);
-      const html = await sr.text();
+    fill.style.width = '75%';
+    status.innerText = `${absPdfs.length} PDF trouvés sur ${visited.size} pages explorées. Extraction du texte...`;
 
-      // Extraire tous les href du HTML Bing
-      const matches = [...html.matchAll(/href=["']([^"']+)["']/gi)];
-      matches.forEach(m => {
-        let rawLink = m[1].replace(/&amp;/g, '&');
-        if (rawLink.startsWith('/')) {
-          rawLink = 'https://www.bing.com' + rawLink;
-        } else if (!rawLink.startsWith('http')) {
-          rawLink = 'https://' + rawLink;
-        }
-        if (rawLink.toLowerCase().includes('.pdf') && !rawLink.includes('bing.com/')) {
-          absPdfs.push(rawLink);
-        }
-      });
-    } catch (e) {
-      console.warn("Échec recherche documents d'état:", e);
-    }
-
-    absPdfs = [...new Set(absPdfs)].slice(0, 15); // Limite à 15 au total pour des raisons de performance Frontend
-
-    let warningText = "";
-    if (absPdfs.length === 0) {
-      warningText = " Aucun fichier public analysable n'a été trouvé. Le dossier documentaire a quand même été créé vide.";
-      console.warn("Scraper: 0 document trouvé.");
-    }
-
-    fill.style.width = '70%';
-    status.innerText = "Création du dossier documentaire (" + absPdfs.length + " fichiers trouvés)";
-
-    // On crée un Theme spécifique
+    // Phase 2: Create theme & subject
     const themeTitle = "Fonds Documentaire - " + cityInput;
-    const { data: themeData } = await supabaseClient.from('themes').insert({ title: themeTitle, description: "Scraping automatisé. Source: " + urlInput + " & État", collectivite_id: state.user.collectivite_id }).select();
+    const { data: themeData } = await supabaseClient.from('themes').insert({ title: themeTitle, description: "Scraping automatisé. Source: " + urlInput + " (" + visited.size + " pages explorées)", collectivite_id: state.user.collectivite_id }).select();
     const themeId = themeData?.[0]?.id || Date.now();
 
-    // Un sujet général
-    const { data: subjData } = await supabaseClient.from('subjects').insert({ theme_id: themeId, title: "Archive Web Automatique", description: "Documents aspirés", is_confidential: false, collectivite_id: state.user.collectivite_id }).select();
+    const { data: subjData } = await supabaseClient.from('subjects').insert({ theme_id: themeId, title: "Archive Web - " + cityInput, description: absPdfs.length + " documents PDF aspirés", is_confidential: false, collectivite_id: state.user.collectivite_id }).select();
     const subjId = subjData?.[0]?.id || Date.now();
 
+    // Phase 3: Download & extract text from PDFs
     for (let i = 0; i < absPdfs.length; i++) {
-      details.innerText = `Traitement: ${absPdfs[i]} (${i + 1}/${absPdfs.length})`;
-      fill.style.width = (70 + (i / absPdfs.length) * 20) + '%';
+      const pdfUrl = absPdfs[i];
+      fill.style.width = (75 + (i / absPdfs.length) * 20) + '%';
+      details.innerText = `PDF ${i+1}/${absPdfs.length}: ${pdfUrl.split('/').pop().substring(0,40)}`;
 
       let textContent = "";
+      try {
+        const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(pdfUrl);
+        const pdfResp = await fetch(proxyUrl, { signal: AbortSignal.timeout(30000) });
+        if (!pdfResp.ok) throw new Error("HTTP " + pdfResp.status);
 
-      // Si on peut télécharger
-      if (absPdfs[i].startsWith('http') && typeof pdfjsLib !== 'undefined') {
-        try {
-          // Utiliser allorigins en mode raw pour mieux passer les buffers binaires
-          const cleanUrl = absPdfs[i].trim();
-          const proxyUrlPdf = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(cleanUrl);
+        const buf = await pdfResp.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument(buf).promise;
 
-          const pdfResp = await fetch(proxyUrlPdf);
-          if (!pdfResp.ok) throw new Error("Le proxy a renvoyé une erreur HTTP " + pdfResp.status);
+        for (let p = 1; p <= Math.min(pdf.numPages, 15); p++) {
+          const page = await pdf.getPage(p);
+          const t = await page.getTextContent();
+          const pageText = t.items.map(it => it.str).join(" ");
 
-          const buf = await pdfResp.arrayBuffer();
-          const pdf = await pdfjsLib.getDocument(buf).promise;
-
-          for (let p = 1; p <= Math.min(pdf.numPages, 10); p++) { // Limite debug 10 pages max pour la démo
-            const page = await pdf.getPage(p);
-            const t = await page.getTextContent();
-            textContent += t.items.map(it => it.str).join(" ") + "\\n";
+          if (pageText.trim().length < 20 && typeof Tesseract !== 'undefined') {
+            // OCR fallback for scanned pages
+            const viewport = page.getViewport({ scale: 1.5 });
+            const canvas = document.createElement("canvas");
+            canvas.width = viewport.width; canvas.height = viewport.height;
+            await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+            const result = await Tesseract.recognize(canvas.toDataURL("image/jpeg"), 'fra');
+            textContent += result.data.text + "\n";
+          } else {
+            textContent += pageText + "\n";
           }
-          if (!textContent.trim()) textContent = "[Le document PDF semble vide ou est composé uniquement d'images scannées sans texte]";
-        } catch (e) {
-          textContent = `[Echec de l'Aspiration Automatique]\n\nImpossible de lire le document source : ${absPdfs[i]}\n\nRaison technique : ${e.message}\n(Ce fichier est probablement protégé ou bloqué par les sécurités anti-scraping du site de la commune)`;
         }
-      } else {
-        textContent = "URL invalide ou moteur PDF introuvable : " + absPdfs[i];
+        if (!textContent.trim()) textContent = "[PDF scanné sans texte extractible]";
+      } catch(e) {
+        textContent = `[Échec aspiration] Source : ${pdfUrl}\nRaison : ${e.message}`;
       }
 
-      await supabaseClient.from('documents').insert({ subject_id: subjId, title: "[Scrap] " + absPdfs[i].split('/').pop().substring(0, 30), content: textContent });
+      const pdfName = decodeURIComponent(pdfUrl.split('/').pop().split('?')[0]).substring(0, 60);
+      await supabaseClient.from('documents').insert({ subject_id: subjId, title: "[Scrap] " + pdfName, content: textContent });
     }
 
     fill.style.width = '100%';
-    status.innerText = "Terminé !";
     document.getElementById('scrap_loader').style.display = 'none';
     document.getElementById('scrap_results').style.display = 'block';
-    document.getElementById('scrap_results_text').innerText = `Opération réussie. ${absPdfs.length} documents ont été extraits et ajoutés à "Fonds Documentaire".` + warningText;
+    document.getElementById('scrap_results_text').innerText = `${absPdfs.length} documents PDF extraits depuis ${visited.size} pages explorées sur ${urlInput}.` + (absPdfs.length === 0 ? " Aucun PDF trouvé sur ce site. Vérifiez l'URL ou essayez une profondeur plus grande." : "");
 
     await syncFromSupabase();
     state.activeThemeId = themeId;
@@ -1204,6 +1350,12 @@ window.generateRagPrompt = async () => {
     const pc = document.getElementById('rag_pc').value;
     const mc = document.getElementById('rag_mc').value.split(',').map(s => s.trim()).filter(Boolean);
 
+    // Auto-anonymisation : injecter les noms des utilisateurs de la collectivité
+    state.users.forEach(u => {
+      if (u.username && u.username.length > 2 && !mc.includes(u.username)) mc.push(u.username);
+      if (u.email && !mc.includes(u.email)) mc.push(u.email);
+    });
+
     const cbs = document.querySelectorAll('.rag-doc-cb:checked');
     let docsContent = "";
     cbs.forEach(cb => {
@@ -1396,6 +1548,12 @@ window.sendChatMessage = async () => {
   // 1. Constuire le contexte de base
   const pc = document.getElementById('rag_pc').value;
   const mc = document.getElementById('rag_mc').value.split(',').map(s => s.trim()).filter(Boolean);
+
+  // Auto-anonymisation : injecter les noms des utilisateurs de la collectivité
+  state.users.forEach(u => {
+    if (u.username && u.username.length > 2 && !mc.includes(u.username)) mc.push(u.username);
+    if (u.email && !mc.includes(u.email)) mc.push(u.email);
+  });
 
   let docsContent = "";
   document.querySelectorAll('.rag-doc-cb:checked').forEach(cb => {

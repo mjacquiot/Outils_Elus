@@ -55,6 +55,7 @@ let state = {
   aiChat: [],
   aiChatViewMode: 'clear',
   uiFilterUsers: null,
+  pendingRegistrations: [],
   apiConfig: {
     active: localStorage.getItem('rag_api_active') || 'none',
     keys: {
@@ -138,6 +139,11 @@ async function syncFromSupabase() {
 
   } catch (err) {
     console.error("Erreur de synchro Supabase:", err);
+  }
+
+  // Charger les pré-autorisations en attente (pour les admins)
+  if (state.user && Permissions.canManageUsers(state.user)) {
+    try { await window.loadPendingRegistrations(); } catch(e) { /* table peut ne pas exister encore */ }
   }
 }
 

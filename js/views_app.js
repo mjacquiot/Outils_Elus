@@ -10,6 +10,7 @@ function render() {
     console.log("App element present: ", !!app);
     if (state.currentView === 'login') app.innerHTML = renderLogin();
     else if (state.currentView === 'public_login') app.innerHTML = renderPublicLogin();
+    else if (state.currentView === 'register') app.innerHTML = renderSelfRegister();
     else app.innerHTML = renderAppLayout(getContentForView());
     console.log("=== RENDER FINISHED ===");
   } catch (e) {
@@ -41,13 +42,52 @@ function renderLogin() {
       <div style="font-size:3rem; color:var(--primary); margin-bottom:1rem; text-align:center;"><span class="material-icons-round" style="font-size:inherit;">account_balance</span></div>
       <h2 style="margin-bottom:0.5rem; text-align:center;">EluConnect</h2><p style="color:var(--text-muted); margin-bottom:2rem; text-align:center;">Portail Collaboratif et Administratif</p>
       <form style="display:flex; flex-direction:column; gap:1rem;" onsubmit="handleLogin(event)">
-        <input type="text" id="login-user" placeholder="Nom d'utilisateur" style="padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;" value="admin" autocomplete="username">
+        <input type="text" id="login-user" placeholder="Email ou nom d'utilisateur" style="padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;" value="" autocomplete="username">
         <input type="password" id="login-pass" placeholder="Mot de passe" style="padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;" value="" autocomplete="current-password">
         <button type="submit" class="btn btn-primary" style="justify-content:center; padding:1rem; width:100%;">Connexion</button>
         
         <hr style="border:0; border-top:1px solid #ddd; margin:0.5rem 0">
+        <button type="button" class="btn btn-outline" onclick="navigate('register')" style="justify-content:center; width:100%; border-color:#10b981; color:#10b981;"><span class="material-icons-round" style="margin-right:0.5rem;">person_add</span> Créer mon compte (Inscription)</button>
         <button type="button" class="btn btn-outline" onclick="navigate('public_login')" style="justify-content:center; width:100%;"><span class="material-icons-round" style="margin-right:0.5rem;">public</span> Connexion en tant que citoyen</button>
       </form>
+    </div></div>
+  `;
+}
+
+function renderSelfRegister() {
+  return `
+    <div class="auth-wrapper"><div class="auth-card" style="max-width:450px;">
+      <div style="font-size:2.5rem; color:#10b981; margin-bottom:1rem; text-align:center;"><span class="material-icons-round" style="font-size:inherit;">how_to_reg</span></div>
+      <h2 style="margin-bottom:0.5rem; text-align:center;">Créer mon compte</h2>
+      <p style="color:var(--text-muted); margin-bottom:1.5rem; text-align:center; font-size:0.9rem;">Votre administrateur doit avoir pré-autorisé votre adresse email. Renseignez-la ci-dessous pour vérifier votre éligibilité.</p>
+      
+      <div id="register-step1" style="display:flex; flex-direction:column; gap:1rem;">
+        <input type="email" id="reg-email" placeholder="Votre adresse email professionnelle" style="padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;" autocomplete="email">
+        <button type="button" class="btn btn-primary" onclick="checkRegistrationEligibility()" style="justify-content:center; padding:1rem; width:100%; background:#10b981; border-color:#059669;">
+          <span class="material-icons-round" style="margin-right:0.5rem;">verified_user</span> Vérifier mon éligibilité
+        </button>
+      </div>
+      
+      <div id="register-step2" style="display:none; flex-direction:column; gap:1rem;">
+        <div style="background:#d1fae5; border:1px solid #a7f3d0; border-radius:8px; padding:1rem; text-align:center;">
+          <span class="material-icons-round" style="color:#059669; font-size:1.5rem; vertical-align:middle;">check_circle</span>
+          <span style="font-weight:600; color:#065f46; margin-left:0.5rem;" id="reg-auth-info">Vous êtes autorisé !</span>
+        </div>
+        <input type="text" id="reg-fullname" placeholder="Votre nom complet (Prénom NOM)" style="padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;" autocomplete="name">
+        <input type="password" id="reg-password" placeholder="Choisissez un mot de passe (min 6 caractères)" style="padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;" autocomplete="new-password">
+        <input type="password" id="reg-password2" placeholder="Confirmer le mot de passe" style="padding:0.8rem; border-radius:8px; border:1px solid #cbd5e1; font-size:1rem;" autocomplete="new-password">
+        <button type="button" class="btn btn-primary" onclick="handleSelfRegister()" style="justify-content:center; padding:1rem; width:100%; background:#10b981; border-color:#059669;">
+          <span class="material-icons-round" style="margin-right:0.5rem;">person_add</span> Créer mon compte
+        </button>
+      </div>
+
+      <div id="register-error" style="display:none; background:#fee2e2; border:1px solid #fecaca; border-radius:8px; padding:1rem; text-align:center; color:#991b1b; font-size:0.9rem; margin-top:1rem;"></div>
+      
+      <div style="margin-top:1.5rem; text-align:center;">
+        <button type="button" class="btn btn-outline" onclick="navigate('login')" style="justify-content:center; width:100;">
+          <span class="material-icons-round" style="margin-right:0.3rem;">arrow_back</span> Retour à la connexion
+        </button>
+      </div>
     </div></div>
   `;
 }
@@ -85,7 +125,7 @@ function renderAppLayout(content) {
         ${Permissions.canManageUsers(u) && u.role !== ROLES.SUPERADMIN ? `<button class="btn btn-icon" onclick="navigate('users')" title="Administration Droits"><span class="material-icons-round">manage_accounts</span></button>` : ''}
         ${(!isP && Permissions.canManageCouncil(u)) && u.role !== ROLES.SUPERADMIN ? `<button class="btn btn-icon" onclick="navigate('council')" title="Conseils"><span class="material-icons-round">calendar_month</span></button>` : ''}
         ${u.role === ROLES.SUPERADMIN ? `<button class="btn btn-icon" onclick="navigate('superadmin')" title="Console SuperAdmin"><span class="material-icons-round" style="color:#f59e0b;">admin_panel_settings</span></button>` : ''}
-        <div style="text-align:right; margin-left:1rem; margin-right:0.5rem;"><div style="font-size:0.75rem; font-weight:800; text-transform:uppercase;">${u.username}</div><div class="role-badge role-${isP ? 'elu' : u.role.toLowerCase()}" style="margin:0; padding:0.1rem 0.4rem; font-size:0.65rem;">${u.role}</div></div>
+        <div style="text-align:right; margin-left:1rem; margin-right:0.5rem;"><div style="font-size:0.75rem; font-weight:800; text-transform:uppercase;">${sanitizeHTML(u.username)}</div><div class="role-badge role-${isP ? 'elu' : u.role.toLowerCase()}" style="margin:0; padding:0.1rem 0.4rem; font-size:0.65rem;">${u.role}</div></div>
         ${!isP ? `<button class="btn btn-icon" onclick="promptChangePassword()" title="Changer de mot de passe"><span class="material-icons-round">vpn_key</span></button>` : ''}
         ${!isP ? `<button class="btn btn-icon" onclick="navigate('options')" title="Options Système"><span class="material-icons-round">settings</span></button>` : ''}
         <button class="btn btn-icon" onclick="logout()"><span class="material-icons-round">logout</span></button>
@@ -111,17 +151,17 @@ function renderPublicDashboard() {
     return `
           <div style="background:white; border:2px solid var(--primary); border-radius:12px; overflow:hidden;">
             <div style="background:var(--primary); color:white; padding:1.5rem;">
-              <div style="font-size:0.8rem; opacity:0.8; margin-bottom:0.5rem; text-transform:uppercase;">Thème : ${tTheme ? tTheme.title : 'Commune'}</div>
-              <h3 style="margin:0; font-size:1.2rem;">${s.title}</h3>
+              <div style="font-size:0.8rem; opacity:0.8; margin-bottom:0.5rem; text-transform:uppercase;">Thème : ${tTheme ? sanitizeHTML(tTheme.title) : 'Commune'}</div>
+              <h3 style="margin:0; font-size:1.2rem;">${sanitizeHTML(s.title)}</h3>
             </div>
             <div style="padding:1.5rem;">
-              <p style="font-size:1.1rem; font-weight:600; margin-bottom:1.5rem;">${s.vote.question}</p>
+              <p style="font-size:1.1rem; font-weight:600; margin-bottom:1.5rem;">${sanitizeHTML(s.vote.question)}</p>
               <div style="display:flex; flex-direction:column; gap:0.8rem;">
                 ${!hasVoted ?
-        s.vote.options.map((opt, idx) => `<button class="btn btn-outline" onclick="submitPublicVote(${s.id}, ${idx})" style="justify-content:flex-start; padding:1rem;"><span>${opt}</span></button>`).join('')
+        s.vote.options.map((opt, idx) => `<button class="btn btn-outline" onclick="submitPublicVote('${s.id}', ${idx})" style="justify-content:flex-start; padding:1rem;"><span>${sanitizeHTML(opt)}</span></button>`).join('')
         : s.vote.options.map((opt, idx) => {
           const pct = totalPts > 0 ? Math.round((s.vote.counts[idx] / totalPts) * 100) : 0;
-          return `<div style="background:#f1f5f9; padding:1rem; border-radius:8px;"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;"><span style="font-weight:600; color:var(--text-main);">${opt}</span><span style="font-size:0.85rem; color:var(--primary); font-weight:bold;">${pct}%</span></div><div style="height:6px; background:#e2e8f0; border-radius:3px; overflow:hidden;"><div style="height:100%; width:${pct}%; background:var(--primary);"></div></div></div>`;
+          return `<div style="background:#f1f5f9; padding:1rem; border-radius:8px;"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;"><span style="font-weight:600; color:var(--text-main);">${sanitizeHTML(opt)}</span><span style="font-size:0.85rem; color:var(--primary); font-weight:bold;">${pct}%</span></div><div style="height:6px; background:#e2e8f0; border-radius:3px; overflow:hidden;"><div style="height:100%; width:${pct}%; background:var(--primary);"></div></div></div>`;
         }).join('')
       }
               </div>
@@ -201,6 +241,12 @@ function renderDashboard() {
 
 function renderThemeView() {
   const t = state.themes.find(x => x.id === state.activeThemeId);
+  // GUARD: si le thème n'existe plus, retour au dashboard
+  if (!t) {
+    state.activeThemeId = null;
+    state.currentView = 'dashboard';
+    return renderDashboard();
+  }
   const subs = state.subjects.filter(s => s.themeId === t.id && Permissions.canSeeSubject(s, state.user));
   const canManage = Permissions.canManageTheme(t, state.user);
 
@@ -209,14 +255,14 @@ function renderThemeView() {
       <div style="display:flex; align-items:center; gap:1rem;"><button class="btn btn-icon" onclick="navigate('dashboard')"><span class="material-icons-round">arrow_back</span></button><h2>${sanitizeHTML(t.title)}</h2></div>
       <div style="display:flex; gap:0.5rem;">
         <button class="btn btn-outline" onclick="navigate('history')" style="color:#64748b; border-color:#cbd5e1;"><span class="material-icons-round">history</span> Historique</button>
-        ${canManage ? `<button class="btn btn-primary" onclick="promptCreateSubject(${t.id})"><span class="material-icons-round">add</span> Nouveau Dossier</button>` : ''}
+        ${canManage ? `<button class="btn btn-primary" onclick="promptCreateSubject('${t.id}')"><span class="material-icons-round">add</span> Nouveau Dossier</button>` : ''}
       </div>
     </div>
     
     <div class="card-grid" style="grid-template-columns:1fr; max-width:800px;">
       ${subs.map(s => {
     return `
-          <div class="card" style="padding:1.5rem; display:flex; justify-content:space-between; align-items:center; border:1px solid #e2e8f0; cursor:pointer;" onclick="openSubject(${s.id})">
+          <div class="card" style="padding:1.5rem; display:flex; justify-content:space-between; align-items:center; border:1px solid #e2e8f0; cursor:pointer;" onclick="openSubject('${s.id}')">
             <div style="flex:1;">
                <h3 style="margin:0 0 0.5rem 0; display:flex; align-items:center; gap:0.5rem;">
                  ${sanitizeHTML(s.title)} 
@@ -224,7 +270,7 @@ function renderThemeView() {
                </h3>
                <p class="card-desc" style="margin:0;">${sanitizeHTML(s.desc)}</p>
             </div>
-            ${canManage ? `<button class="btn btn-icon" onclick="deleteSubject(event, ${s.id})" style="color:#ef4444;"><span class="material-icons-round">delete</span></button>` : ''}
+            ${canManage ? `<button class="btn btn-icon" onclick="deleteSubject(event, '${s.id}')" style="color:#ef4444;"><span class="material-icons-round">delete</span></button>` : ''}
             <span class="material-icons-round" style="color:var(--text-muted); margin-left:1rem;">chevron_right</span>
           </div>
         `;
@@ -236,6 +282,12 @@ function renderThemeView() {
 
 function renderSubjectView() {
   const s = state.subjects.find(x => x.id === state.activeSubjectId);
+  // GUARD: si le sujet n'existe plus, retour au dashboard
+  if (!s) {
+    state.activeSubjectId = null;
+    state.currentView = 'dashboard';
+    return renderDashboard();
+  }
   const msgs = state.messages.filter(m => m.type === 'subject' && m.targetId === s.id);
   const canManage = Permissions.canManageSubject(s, state.user);
   const canAddToAgenda = Permissions.canAddToAgenda(s, state.user);
@@ -252,9 +304,9 @@ function renderSubjectView() {
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
               <h3 style="margin:0; display:flex; align-items:center; gap:0.5rem; color:#4f46e5;"><span class="material-icons-round">how_to_vote</span> Vote Interne Décisionnel</h3>
             </div>
-            <p style="font-size:1.1rem; font-weight:600; margin-bottom:1.5rem;">${s.vote.question}</p>
+            <p style="font-size:1.1rem; font-weight:600; margin-bottom:1.5rem;">${sanitizeHTML(s.vote.question)}</p>
             <div style="display:flex; flex-direction:column; gap:0.8rem;">
-               ${s.vote.options.map((opt, idx) => `<button class="btn btn-primary" onclick="submitEluVote(${s.id}, ${idx})" style="justify-content:flex-start; padding:0.8rem 1rem; background:white; color:#4f46e5; border:1px solid #a5b4fc;">${opt}</button>`).join('')}
+               ${s.vote.options.map((opt, idx) => `<button class="btn btn-primary" onclick="submitEluVote('${s.id}', ${idx})" style="justify-content:flex-start; padding:0.8rem 1rem; background:white; color:#4f46e5; border:1px solid #a5b4fc;">${sanitizeHTML(opt)}</button>`).join('')}
             </div>
          </div>
        `;
@@ -264,11 +316,11 @@ function renderSubjectView() {
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
               <h3 style="margin:0; display:flex; align-items:center; gap:0.5rem; color:${isPublic ? '#166534' : 'var(--text-main)'};"><span class="material-icons-round">${isPublic ? 'public' : 'how_to_vote'}</span> ${isPublic ? 'Consultation Citoyenne' : 'Résultats Vote Décisionnel'}</h3>
             </div>
-            <p style="font-size:1.05rem; font-weight:600; margin-bottom:1.5rem;">${s.vote.question}</p>
+            <p style="font-size:1.05rem; font-weight:600; margin-bottom:1.5rem;">${sanitizeHTML(s.vote.question)}</p>
             <div style="display:flex; flex-direction:column; gap:0.6rem;">
                ${s.vote.options.map((opt, idx) => {
         const pct = totalPts > 0 ? Math.round((s.vote.counts[idx] / totalPts) * 100) : 0;
-        return `<div style="position:relative; background:white; border-radius:6px; overflow:hidden; padding:0.8rem; border:1px solid ${isPublic ? '#dcfce7' : '#e2e8f0'};"><div style="position:absolute; top:0; left:0; bottom:0; width:${pct}%; background:${isPublic ? '#22c55e' : 'var(--primary)'}; opacity:0.1; z-index:0;"></div><div style="position:relative; z-index:1; display:flex; justify-content:space-between; align-items:center;"><span style="font-weight:600; color:var(--text-main); font-size:0.9rem;">${opt}</span><span style="font-size:0.85rem; color:var(--text-muted); font-weight:bold;">${pct}% (${s.vote.counts[idx]})</span></div></div>`;
+        return `<div style="position:relative; background:white; border-radius:6px; overflow:hidden; padding:0.8rem; border:1px solid ${isPublic ? '#dcfce7' : '#e2e8f0'};"><div style="position:absolute; top:0; left:0; bottom:0; width:${pct}%; background:${isPublic ? '#22c55e' : 'var(--primary)'}; opacity:0.1; z-index:0;"></div><div style="position:relative; z-index:1; display:flex; justify-content:space-between; align-items:center;"><span style="font-weight:600; color:var(--text-main); font-size:0.9rem;">${sanitizeHTML(opt)}</span><span style="font-size:0.85rem; color:var(--text-muted); font-weight:bold;">${pct}% (${s.vote.counts[idx]})</span></div></div>`;
       }).join('')}
             </div>
          </div>
@@ -278,10 +330,10 @@ function renderSubjectView() {
 
   return `
     <div class="view-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
-      <div style="display:flex; align-items:center; gap:1rem;"><button class="btn btn-icon" onclick="openTheme(${s.themeId})"><span class="material-icons-round">arrow_back</span></button><div><h2 style="display:flex; align-items:center; gap:0.5rem;">${sanitizeHTML(s.title)}</h2></div></div>
+      <div style="display:flex; align-items:center; gap:1rem;"><button class="btn btn-icon" onclick="openTheme('${s.themeId}')"><span class="material-icons-round">arrow_back</span></button><div><h2 style="display:flex; align-items:center; gap:0.5rem;">${sanitizeHTML(s.title)}</h2></div></div>
       <div style="display:flex; gap:0.5rem;">
-        ${canManage && !s.vote ? `<button class="btn btn-outline" style="border-color:var(--primary); color:var(--primary);" onclick="promptCreateVote(${s.id})"><span class="material-icons-round">how_to_vote</span> Créer Sondage/Vote</button>` : ''}
-        ${canAddToAgenda && !s.councilDate ? `<button class="btn btn-primary" onclick="addToCouncil(${s.id})">Ordre du Jour Conseil</button>` : ''}
+        ${canManage && !s.vote ? `<button class="btn btn-outline" style="border-color:var(--primary); color:var(--primary);" onclick="promptCreateVote('${s.id}')"><span class="material-icons-round">how_to_vote</span> Créer Sondage/Vote</button>` : ''}
+        ${canAddToAgenda && !s.councilDate ? `<button class="btn btn-primary" onclick="addToCouncil('${s.id}')">Ordre du Jour Conseil</button>` : ''}
       </div>
     </div>
     
@@ -293,7 +345,7 @@ function renderSubjectView() {
         <div style="background:white; border:1px solid #e2e8f0; padding:1.5rem; border-radius:12px;">
            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
              <h3 style="margin:0;"><span class="material-icons-round" style="color:var(--text-muted); vertical-align:middle;">folder</span> Documents Informatiques</h3>
-             ${state.user.role !== ROLES.TECHNICIEN ? `<label class="btn btn-outline btn-sm" style="cursor:pointer; border-color:var(--primary); color:var(--primary);"><input type="file" id="fileOCR" accept="image/*, .png, .jpg, .jpeg, .pdf, .txt, .csv, .xls, .xlsx" style="display:none" onchange="handleDocUpload(event, ${s.id})" multiple>Importer Document</label>` : ''}
+             ${state.user.role !== ROLES.TECHNICIEN ? `<label class="btn btn-outline btn-sm" style="cursor:pointer; border-color:var(--primary); color:var(--primary);"><input type="file" id="fileOCR" accept="image/*, .png, .jpg, .jpeg, .pdf, .txt, .csv, .xls, .xlsx" style="display:none" onchange="handleDocUpload(event, '${s.id}')" multiple>Importer Document</label>` : ''}
            </div>
            
            <div id="ocr-loader" style="display:none; padding:1rem; background:#f8fafc; border-radius:8px; border:1px solid #cbd5e1; text-align:center; color:#475569; margin-bottom:1rem;">
@@ -304,11 +356,11 @@ function renderSubjectView() {
            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:1rem;">
              ${(s.docs || []).map(d => `
                 <div class="card" style="padding:1rem; border:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; gap:0.8rem; border-radius:8px;">
-                     <div onclick="openDoc(${d.id})" style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; flex:1; overflow:hidden;">
+                     <div onclick="openDoc('${d.id}')" style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; flex:1; overflow:hidden;">
                         <span class="material-icons-round" style="color:#ef4444; font-size:2rem;">description</span>
                         <div style="font-size:0.85rem; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${sanitizeHTML(d.title)}">${sanitizeHTML(d.title)}</div>
                      </div>
-                     ${canManage ? `<button class="btn btn-icon" onclick="deleteDocument(${s.id}, ${d.id})" style="color:#ef4444; padding:0;"><span class="material-icons-round" style="font-size:1.2rem;">delete</span></button>` : ''}
+                     ${canManage ? `<button class="btn btn-icon" onclick="deleteDocument('${s.id}', '${d.id}')" style="color:#ef4444; padding:0;"><span class="material-icons-round" style="font-size:1.2rem;">delete</span></button>` : ''}
                 </div>
               `).join('')}
              ${(!s.docs || s.docs.length === 0) ? '<div style="grid-column:1/-1; color:#94a3b8; font-size:0.85rem; text-align:center;">Aucun document. (Les fichiers importés seront transformés en texte indexable).</div>' : ''}
@@ -324,7 +376,7 @@ function renderSubjectView() {
         </div>
         <div style="padding:1rem; border-top:1px solid #e2e8f0; display:flex; gap:0.5rem;">
           <input id="smsg" style="flex:1; border:1px solid #cbd5e1; border-radius:24px; padding:0.6rem 1rem; font-size:0.85rem;" placeholder="Partager une note...">
-          <button class="btn btn-primary btn-icon" onclick="sendMsg('subject', ${s.id}, 'smsg')" style="border-radius:50%; width:40px; height:40px; display:flex; align-items:center; justify-content:center;"><span class="material-icons-round">send</span></button>
+          <button class="btn btn-primary btn-icon" onclick="sendMsg('subject', '${s.id}', 'smsg')" style="border-radius:50%; width:40px; height:40px; display:flex; align-items:center; justify-content:center;"><span class="material-icons-round">send</span></button>
         </div>
       </div>
     </div>
@@ -333,12 +385,18 @@ function renderSubjectView() {
 
 function renderHistoryView() {
   const t = state.themes.find(x => x.id === state.activeThemeId);
+  // GUARD: si le thème n'existe plus
+  if (!t) {
+    state.activeThemeId = null;
+    state.currentView = 'dashboard';
+    return renderDashboard();
+  }
   const logs = state.historyLogs.filter(h => h.themeId === t.id).sort((a, b) => new Date(b.date) - new Date(a.date));
 
   return `
     <div class="view-header" style="display:flex; align-items:center; gap:1rem;">
        <button class="btn btn-icon" onclick="navigate('theme')"><span class="material-icons-round">arrow_back</span></button>
-       <h2>Historique des actions - ${t.title}</h2>
+       <h2>Historique des actions - ${sanitizeHTML(t.title)}</h2>
     </div>
     
     <div style="background:white; border-radius:12px; border:1px solid #e2e8f0; max-width:900px;">
@@ -357,9 +415,9 @@ function renderHistoryView() {
     const isDel = l.action.includes('SUPPRESSION');
     return `<tr style="border-bottom:1px solid #f1f5f9;">
                  <td style="padding:1rem; font-size:0.85rem; color:#64748b;">${dt.toLocaleDateString()} ${dt.toLocaleTimeString()}</td>
-                 <td style="padding:1rem; font-size:0.85rem; font-weight:600; color:var(--text-main);">${l.user}</td>
+                 <td style="padding:1rem; font-size:0.85rem; font-weight:600; color:var(--text-main);">${sanitizeHTML(l.user)}</td>
                  <td style="padding:1rem; font-size:0.8rem;"><span style="background:${isDel ? '#fee2e2' : '#e0e7ff'}; color:${isDel ? '#ef4444' : '#4f46e5'}; padding:0.2rem 0.5rem; border-radius:4px; font-weight:bold;">${l.action}</span></td>
-                 <td style="padding:1rem; font-size:0.85rem; color:#334155;">${l.description}</td>
+                 <td style="padding:1rem; font-size:0.85rem; color:#334155;">${sanitizeHTML(l.description)}</td>
                </tr>`;
   }).join('')}
             ${logs.length === 0 ? '<tr><td colspan="4" style="padding:2rem; text-align:center; color:#94a3b8; font-style:italic;">Aucune action enregistrée sur ce thème pour le moment.</td></tr>' : ''}
@@ -371,6 +429,7 @@ function renderHistoryView() {
 
 function renderDocViewer() {
   const d = state.subjects.flatMap(x => x.docs || []).find(x => x.id === state.activeDocId);
+  if (!d) { state.activeDocId = null; return ''; }
   return `<div style="position:fixed; inset:0; background:rgba(15, 23, 42, 0.85); z-index:2000; display:flex; justify-content:center; align-items:center; padding:2rem;">
      <div style="background:white; width:100%; max-width:900px; height:85vh; border-radius:12px; display:flex; flex-direction:column; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
        <div style="display:flex; justify-content:space-between; align-items:center; padding:1.5rem; border-bottom:1px solid #e2e8f0; background:#f8fafc; border-radius:12px 12px 0 0;">
@@ -399,7 +458,7 @@ function renderCouncilManagement() {
         <h3 style="margin:0 0 1rem 0;">Séance du ${dt.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à ${dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</h3>
         <h4 style="margin:0 0 1rem 0; padding-bottom:0.5rem; border-bottom:1px solid #f1f5f9; font-size:0.9rem; color:var(--text-muted); text-transform:uppercase; display:flex; justify-content:space-between; align-items:center;">
            <span>Ordre du jour</span>
-           ${canManageAg ? `<button class="btn btn-outline btn-sm" onclick="promptAddCouncilItem(${c.id})" style="padding:0.3rem 0.6rem; font-size:0.75rem;"><span class="material-icons-round" style="font-size:1rem; margin-right:0.3rem;">add</span>Point Libre</button>` : ''}
+           ${canManageAg ? `<button class="btn btn-outline btn-sm" onclick="promptAddCouncilItem('${c.id}')" style="padding:0.3rem 0.6rem; font-size:0.75rem;"><span class="material-icons-round" style="font-size:1rem; margin-right:0.3rem;">add</span>Point Libre</button>` : ''}
         </h4>
         <ul style="margin:0; padding-left:0; display:flex; flex-direction:column; gap:0.5rem; color:var(--text-main); font-size:0.9rem; list-style:none;">
            ${ag.map(s => `
@@ -410,8 +469,8 @@ function renderCouncilManagement() {
                 </div>
                 ${canManageAg ? `
                 <div style="display:flex; gap:0.5rem; margin-left:1rem;">
-                   ${s.isManual ? `<button class="btn btn-icon" style="padding:0; width:28px; height:28px; color:#64748b; background:white; border:1px solid #cbd5e1;" onclick="editCouncilItem(${c.id}, '${s.id}')"><span class="material-icons-round" style="font-size:1.1rem;">edit</span></button>` : ''}
-                   <button class="btn btn-icon" style="padding:0; width:28px; height:28px; color:#ef4444; background:white; border:1px solid #fecaca;" onclick="removeCouncilItem(${c.id}, '${typeof s.id === 'object' ? s.id : s.id}')" title="Retirer de l'ordre du jour"><span class="material-icons-round" style="font-size:1.1rem;">close</span></button>
+                   ${s.isManual ? `<button class="btn btn-icon" style="padding:0; width:28px; height:28px; color:#64748b; background:white; border:1px solid #cbd5e1;" onclick="editCouncilItem('${c.id}', '${s.id}')"><span class="material-icons-round" style="font-size:1.1rem;">edit</span></button>` : ''}
+                   <button class="btn btn-icon" style="padding:0; width:28px; height:28px; color:#ef4444; background:white; border:1px solid #fecaca;" onclick="removeCouncilItem('${c.id}', '${s.id}')" title="Retirer de l'ordre du jour"><span class="material-icons-round" style="font-size:1.1rem;">close</span></button>
                 </div>` : ''}
             </li>`).join('')}
            ${ag.length === 0 ? '<li style="color:#94a3b8; font-style:italic; text-align:center; padding:1rem;">Aucun point à l\'ordre du jour.</li>' : ''}
@@ -430,11 +489,14 @@ function renderUsersManagement() {
       ? state.users.filter(u => u.collectivite_id === state.uiFilterUsers) 
       : state.users;
 
+  // Charger les autorisations en attente (si elles existent dans state)
+  const pendingRegs = (state.pendingRegistrations || []);
+
   return `
     <div class="view-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
       <div style="flex:1;">
         <h2 style="margin:0 0 0.5rem 0;">Administration : Utilisateurs et Accès</h2>
-        <p style="color:var(--text-muted); margin:0;">Gestion des profils de la base de données Supabase.</p>
+        <p style="color:var(--text-muted); margin:0;">Gestion des profils et pré-autorisations d'inscription.</p>
       </div>
       ${state.user.role === ROLES.SUPERADMIN ? `
       <div>
@@ -445,29 +507,51 @@ function renderUsersManagement() {
       </div>
       ` : ''}
     </div>
+
+    <!-- Autorisations en attente -->
+    ${pendingRegs.length > 0 ? `
+    <div style="margin-bottom:2rem; background:#fefce8; border:1px solid #fde68a; border-radius:12px; padding:1.5rem;">
+      <h3 style="margin:0 0 1rem 0; color:#92400e; display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round">pending_actions</span> Inscriptions pré-autorisées en attente (${pendingRegs.length})</h3>
+      <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap:1rem;">
+        ${pendingRegs.map(r => `
+          <div style="background:white; border:1px solid #fde68a; border-radius:8px; padding:1rem; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-weight:600; font-size:0.95rem; color:var(--text-main);">${sanitizeHTML(r.email)}</div>
+              <div style="font-size:0.8rem; color:#64748b; margin-top:0.2rem;">
+                <span class="role-badge role-${(r.role || 'elu').toLowerCase()}" style="margin:0; font-size:0.65rem;">${r.role || 'elu'}</span>
+                ${r.full_name ? ` · ${sanitizeHTML(r.full_name)}` : ''}
+              </div>
+            </div>
+            <button class="btn btn-icon" onclick="revokePreAuth('${r.id}')" style="color:#ef4444;" title="Révoquer l'autorisation"><span class="material-icons-round" style="font-size:1.1rem;">close</span></button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    ` : ''}
+
   <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:1.5rem;">
   ${displayedUsers.map(u => {
     return `
     <div class="card" style="border:1px solid #e2e8f0; display:flex; flex-direction:column;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-         <b style="font-size:1.1rem;">${u.username}</b>
+         <b style="font-size:1.1rem;">${sanitizeHTML(u.username)}</b>
          ${(state.user.role === ROLES.SUPERADMIN || state.user.role === ROLES.ADMIN || (state.user.role === ROLES.MAIRE && u.role !== ROLES.ADMIN)) && u.id !== state.user.id ? `
          <select onchange="changeUserRole('${u.id}', this.value)" style="font-size:0.75rem; padding:0.1rem; border-radius:4px; border:1px solid #cbd5e1; background:white;">
             ${Object.values(ROLES).map(r => `<option value="${r}" ${r === u.role ? 'selected' : ''}>${r}</option>`).join('')}
          </select>` : `<span class="role-badge role-${u.role.toLowerCase()}" style="margin:0; font-size:0.75rem;">${u.role}</span>`}
       </div>
-      <div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem; flex:1;">Email : ${u.email} ${state.user.role === ROLES.SUPERADMIN ? `<div style="margin-top:0.3rem;"><span style="font-size:0.75rem; color:#8b5cf6; background:#ede9fe; padding:0.1rem 0.4rem; border-radius:4px;">Collectivité: ${u.collectivite_id || 'Global (SA)'}</span></div>` : ''}</div>
+      <div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem; flex:1;">Email : ${sanitizeHTML(u.email)} ${state.user.role === ROLES.SUPERADMIN ? `<div style="margin-top:0.3rem;"><span style="font-size:0.75rem; color:#8b5cf6; background:#ede9fe; padding:0.1rem 0.4rem; border-radius:4px;">Collectivité: ${u.collectivite_id || 'Global (SA)'}</span></div>` : ''}</div>
       ${[ROLES.ADJOINT, ROLES.DELEGUE].includes(u.role) ? `
       <div style="background:#f8fafc; padding:1rem; border-radius:8px;">
          <div style="font-size:0.8rem; font-weight:600; color:var(--text-muted); margin-bottom:0.5rem;">Thèmes Rattachés :</div>
-         ${(u.attachedThemes || []).map(tid => {
+         ${(u.attached_themes || u.attachedThemes || []).map(tid => {
       const t = state.themes.find(x => x.id === tid);
-      return t ? `<div style="font-size:0.85rem; color:var(--text-main); margin-bottom:0.3rem; display:flex; justify-content:space-between;">• ${t.title} <span class="material-icons-round" style="font-size:1rem; color:#ef4444; cursor:pointer;" onclick="removeUserTheme('${u.id}', ${tid})">close</span></div>` : '';
+      return t ? `<div style="font-size:0.85rem; color:var(--text-main); margin-bottom:0.3rem; display:flex; justify-content:space-between;">• ${sanitizeHTML(t.title)} <span class="material-icons-round" style="font-size:1rem; color:#ef4444; cursor:pointer;" onclick="removeUserTheme('${u.id}', '${tid}')">close</span></div>` : '';
     }).join('')}
-         ${(!u.attachedThemes || u.attachedThemes.length === 0) ? '<div style="font-style:italic; font-size:0.8rem; color:#94a3b8; margin-bottom:1rem;">Aucun thème</div>' : ''}
+         ${(!(u.attached_themes || u.attachedThemes) || (u.attached_themes || u.attachedThemes || []).length === 0) ? '<div style="font-style:italic; font-size:0.8rem; color:#94a3b8; margin-bottom:1rem;">Aucun thème</div>' : ''}
          <div style="margin-top:0.5rem; display:flex; gap:0.5rem;">
             <select id="sel-thm-${u.id}" style="flex:1; padding:0.4rem; border-radius:4px; border:1px solid #cbd5e1; font-size:0.8rem; background:white;">
-              ${state.themes.filter(th => !u.attachedThemes.includes(th.id)).map(th => `<option value="${th.id}">${th.title}</option>`).join('')}
+              ${state.themes.filter(th => !(u.attached_themes || u.attachedThemes || []).includes(th.id)).map(th => `<option value="${th.id}">${sanitizeHTML(th.title)}</option>`).join('')}
             </select>
             <button class="btn btn-outline btn-sm" onclick="addUserTheme('${u.id}')">Ajouter</button>
          </div>
@@ -479,16 +563,16 @@ function renderUsersManagement() {
       </div>` : ''}
     </div>`;
   }).join('')}
-   <div class="card" style="border:1px dashed #cbd5e1; background:#f8fafc; display:flex; flex-direction:column; justify-content:center; align-items:center; color:#64748b; padding:2rem; cursor:pointer;" onclick="promptCreateUser()">
+   <div class="card" style="border:1px dashed #10b981; background:#f0fdf4; display:flex; flex-direction:column; justify-content:center; align-items:center; color:#15803d; padding:2rem; cursor:pointer;" onclick="promptPreAuthorize()">
       <span class="material-icons-round" style="font-size:2rem; margin-bottom:0.5rem;">person_add</span>
-      <b style="font-size:1rem;">Créer Utilisateur</b>
+      <b style="font-size:1rem;">Pré-autoriser un utilisateur</b>
+      <span style="font-size:0.75rem; text-align:center; margin-top:0.5rem; color:#166534; max-width:200px;">L'utilisateur créera son propre compte depuis la page de connexion.</span>
    </div>
    <label class="card" style="border:1px dashed #bbf7d0; background:#f0fdf4; display:flex; flex-direction:column; justify-content:center; align-items:center; color:#15803d; padding:2rem; cursor:pointer; transition:all 0.2s;">
       <input type="file" id="massUsersCsv" accept=".csv" style="display:none" onchange="importMassUsers(event)">
       <span class="material-icons-round" style="font-size:2rem; margin-bottom:0.5rem;">group_add</span>
       <b style="font-size:1rem;">Import Massif (CSV)</b>
-      <span style="font-size:0.75rem; text-align:center; margin-top:0.5rem; color:#166534; max-width:200px;">Pré-enregistrer des comptes (Nom, Prénom, Email) en attente de connexion.</span>
+      <span style="font-size:0.75rem; text-align:center; margin-top:0.5rem; color:#166534; max-width:200px;">Pré-autoriser des comptes en masse (Nom, Prénom, Email, Rôle).</span>
    </label>
    </div>`;
 }
-
