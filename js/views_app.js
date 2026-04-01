@@ -483,6 +483,12 @@ function renderUsersManagement() {
       <span class="material-icons-round" style="font-size:2rem; margin-bottom:0.5rem;">person_add</span>
       <b style="font-size:1rem;">Créer Utilisateur</b>
    </div>
+   <label class="card" style="border:1px dashed #bbf7d0; background:#f0fdf4; display:flex; flex-direction:column; justify-content:center; align-items:center; color:#15803d; padding:2rem; cursor:pointer; transition:all 0.2s;">
+      <input type="file" id="massUsersCsv" accept=".csv" style="display:none" onchange="importMassUsers(event)">
+      <span class="material-icons-round" style="font-size:2rem; margin-bottom:0.5rem;">group_add</span>
+      <b style="font-size:1rem;">Import Massif (CSV)</b>
+      <span style="font-size:0.75rem; text-align:center; margin-top:0.5rem; color:#166534; max-width:200px;">Pré-enregistrer des comptes (Nom, Prénom, Email) en attente de connexion.</span>
+   </label>
    </div>`;
 }
 

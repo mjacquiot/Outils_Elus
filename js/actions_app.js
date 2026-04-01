@@ -91,11 +91,22 @@ window.createCollectiviteAdmin = async () => {
     if (error) {
       alert("Erreur de création : " + error.message);
     } else {
-      // Tenter de forcer l'entrée dans public.profiles si le trigger Supabase ne le fait pas.
       if (data.user) {
         try {
-          await supabaseClient.from('profiles').upsert({ id: data.user.id, email: mail, username: name, role: ROLES.ADMIN, collectivite_id: colId });
-        } catch (e) { }
+          // Attendre 400ms pour laisser le trigger Supabase créer la ligne par défaut dans la BDD
+          await new Promise(r => setTimeout(r, 400));
+          // Forcer la MAJ avec la bonne collectivité via un update explicite
+          const { error: pErr } = await supabaseClient.from('profiles')
+               .update({ role: ROLES.ADMIN, collectivite_id: colId })
+               .eq('id', data.user.id);
+          
+          if (pErr) {
+             console.warn("Update échoué, tentative d'insertion manuelle.", pErr);
+             await supabaseClient.from('profiles').insert({ id: data.user.id, email: mail, username: name, role: ROLES.ADMIN, collectivite_id: colId });
+          }
+        } catch (e) { 
+           console.error("Échec critique de l'affectation du profil:", e);
+        }
       }
       alert(`Compte Créé avec succès pour la collectivité "${colId}" !\n\nL'utilisateur peut maintenant se connecter avec :\nEmail : ${mail}\nMot de passe : ${pass}\n\nVous êtes maintenant déconnecté.`);
       await window.logout();
@@ -211,6 +222,75 @@ window.promptCreateUser = async () => {
     alert("Une erreur inattendue est survenue.");
   }
 }
+
+window.importMassUsers = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  try {
+    const text = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = ev => resolve(ev.target.result);
+      reader.onerror = reject;
+      reader.readAsText(file, 'windows-1252'); // Excel compatibility
+    });
+
+    const lines = text.split('\n').filter(l => l.trim() !== '');
+    if (lines.length < 2) throw new Error("Le fichier est vide ou manque d'en-tête (au moins 2 lignes).");
+
+    const usersToCreate = [];
+    
+    // Convention métier: Col 0 = Nom, Col 1 = Prénom, Col 2 = Email, Col 3 (Opt) = Rôle
+    for(let i = 1; i < lines.length; i++) {
+        const cells = lines[i].split(/[,;]/).map(c => c.trim().replace(/^["']|["']$/g, ''));
+        // We consider valid if cell 2 contains an @
+        if (cells.length >= 3 && cells[2].includes('@')) {
+            const nom = cells[0];
+            const prenom = cells[1];
+            const email = cells[2].toLowerCase();
+            let rawRole = cells[3] ? cells[3].toLowerCase() : 'elu';
+            
+            let r = ROLES.ELU;
+            if (rawRole.includes('admin')) r = ROLES.ADMIN;
+            else if (rawRole.includes('maire')) r = ROLES.MAIRE;
+            else if (rawRole.includes('adjoint')) r = ROLES.ADJOINT;
+            else if (rawRole.includes('delegue') || rawRole.includes('délégué')) r = ROLES.DELEGUE;
+            else if (rawRole.includes('technicien') || rawRole.includes('tech')) r = ROLES.TECHNICIEN;
+
+            usersToCreate.push({
+               id: crypto.randomUUID(), // ID temporaire (Supabase auth.users non impliqué encore)
+               email: email,
+               username: `${prenom} ${nom}`,
+               role: r,
+               collectivite_id: state.user.collectivite_id,
+               attached_themes: []
+            });
+        }
+    }
+
+    if (usersToCreate.length === 0) return alert("Aucun utilisateur valide trouvé. Vérifiez que la colonne 3 contient bien des emails pour chaque ligne.");
+
+    if (confirm(`${usersToCreate.length} comptes sont en attente d'import pour la collectivité ${state.user.collectivite_id}.\nLes profils apparaîtront dans la liste. Les utilisateurs n'auront qu'à "s'inscrire/se connecter" depuis le portail avec le même email pour lier le compte de sécurité.\n\nÊtes vous sûr ?`)) {
+        
+        const { error } = await supabaseClient.from('profiles').insert(usersToCreate);
+        if (error) {
+           // Possible duplicate email checking
+           if (error.code === '23505') throw new Error("Certains emails existent déjà dans la base.");
+           throw error;
+        }
+        
+        alert(`Succès ! Les profils ont été créés.`);
+        await syncFromSupabase();
+        render();
+    }
+
+  } catch (err) {
+    console.error(err);
+    alert("Erreur d'import massif : " + err.message);
+  } finally {
+    e.target.value = ''; // Reset the input file
+  }
+};
 
 window.addUserTheme = async (uid) => {
   const sel = document.getElementById('sel-thm-' + uid);
@@ -534,7 +614,9 @@ window.renderRagIaView = () => {
               <div>
                   <label style="font-size:0.9rem; font-weight:600; display:block; margin-bottom:0.5rem; color:#334155;"><span class="material-icons-round" style="font-size:1.1rem; vertical-align:middle; color:#f43f5e;">gpp_bad</span> Entités à pseudonymiser obligatoirement</label>
                   <textarea id="rag_mc" style="width:100%; height:100px; padding:1rem; border-radius:8px; border:1px solid #cbd5e1; font-family:inherit; background:#f8fafc; transition:all 0.2s;" placeholder="ex: Jean Dupont, Mairie de Trifouilly (séparé par des virgules)">${sanitizeHTML(mc)}</textarea>
-              </div>
+                  <div style="margin-top:0.5rem; text-align:right;">
+                     <label class="btn btn-outline btn-sm" style="cursor:pointer; padding:0.2rem 0.5rem; font-size:0.75rem;"><input type="file" id="ragCsvImport" accept=".csv" style="display:none" onchange="importRagMcCsv(event)"><span class="material-icons-round" style="font-size:1rem; margin-right:0.3rem;">upload_file</span> Importer liste CSV (Noms, Emails...)</label>
+                  </div>
               </div>
           </div>
           <div style="text-align:right; margin-top:1.5rem;">
@@ -647,7 +729,17 @@ window.renderRagIaView = () => {
                     <button class="btn btn-icon" style="color:#64748b;" onclick="resetRagUI()" title="Recommencer"><span class="material-icons-round">refresh</span></button>
                 </div>
                 <p style="font-size:0.9rem; color:#047857; background:#d1fae5; padding:0.8rem; border-radius:8px; border:1px solid #a7f3d0; margin-top:0;">1. Copiez ce texte et collez-le dans l'interface de votre IA (ChatGPT, Claude, Gemini...). Les données sensibles ont été masquées.</p>
-                <textarea id="rag_compiled" style="width:100%; height:120px; padding:1rem; border-radius:8px; border:1px solid #a7f3d0; background:#f0fdf4; margin-bottom:0.5rem; font-family:inherit; font-size:0.85rem;" readonly></textarea>
+                 <div style="position:relative;">
+                    <textarea id="rag_compiled" onmouseup="handleRagSelection(event)" style="width:100%; height:120px; padding:1rem; border-radius:8px; border:1px solid #a7f3d0; background:#f0fdf4; margin-bottom:0.5rem; font-family:inherit; font-size:0.85rem;" readonly></textarea>
+                    
+                    <div id="rag_selection_popup" style="display:none; position:absolute; bottom:20px; right:20px; background:#1e293b; color:white; padding:0.5rem; border-radius:8px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.2); z-index:50;">
+                       <div style="font-size:0.75rem; margin-bottom:0.4rem; color:#94a3b8; font-weight:600;">Oubli IA ? Cacher ce mot (Regénérer ensuite):</div>
+                       <div style="display:flex; gap:0.4rem;">
+                          <button class="btn btn-primary btn-sm" style="font-size:0.7rem; padding:0.2rem 0.5rem;" onclick="addSelectionToRag()"><span class="material-icons-round" style="font-size:0.9rem; margin-right:0.2rem;">person_off</span> Masquer Obligatoirement</button>
+                          <button class="btn btn-icon btn-sm" style="color:#ef4444; width:22px; height:22px; padding:0; background:transparent;" onclick="closeRagSelectionPopup()"><span class="material-icons-round" style="font-size:1.1rem;">close</span></button>
+                       </div>
+                    </div>
+                 </div>
                 <button class="btn btn-outline" style="border-color:#10b981; color:#059669; justify-content:center;" onclick="copyRagPrompt()"><span class="material-icons-round" style="margin-right:0.4rem;">content_copy</span>Copier le texte</button>
                 
                 <div style="margin:2rem 0; border-top:1px dashed #cbd5e1; position:relative;">
@@ -917,6 +1009,63 @@ window.saveRagContext = async () => {
   alert("Paramètres de contexte RAG mémorisés !");
 };
 
+window.importRagMcCsv = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const btnIcon = e.target.nextElementSibling;
+  const oldIcon = btnIcon.innerText;
+  btnIcon.innerText = 'hourglass_empty';
+
+  try {
+    const text = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = ev => resolve(ev.target.result);
+      reader.onerror = reject;
+      // Force ansi/utf-8 compatibility since standard users use Excel French
+      reader.readAsText(file, 'windows-1252'); // very common for French Excel CSV exports
+    });
+
+    // In case it was actually utf-8, windows-1252 could mess up accents.
+    // A more thorough solution exists but for now it helps with Excel.
+    
+    const lines = text.split('\n').filter(l => l.trim() !== '');
+    if (lines.length < 2) throw new Error("Le fichier est vide ou manque d'en-tête (au moins 2 lignes).");
+
+    const entities = new Set();
+    
+    for(let i = 1; i < lines.length; i++) {
+        // Split by , or ;
+        const cells = lines[i].split(/[,;]/).map(c => c.trim().replace(/^["']|["']$/g, ''));
+        
+        cells.forEach(c => {
+            if(c.length > 2 && !c.match(/^[0-9]+$/)) entities.add(c);
+            // Also keep standard phone formats
+            if(c.match(/^(?:(?:\+|00)33[\s.-]{0,3}(?:\(0\)[\s.-]{0,3})?|0)[1-9](?:(?:[\s.-]?\d{2}){4}|\d{2}(?:[\s.-]?\d{3}){2})$/)) entities.add(c);
+        });
+
+        // Often name/surname are in col 0 and 1
+        if (cells.length >= 2 && cells[0].length > 1 && cells[1].length > 1) {
+             entities.add(`${cells[0]} ${cells[1]}`);
+             entities.add(`${cells[1]} ${cells[0]}`); // Reverse order
+        }
+    }
+
+    const currentMcBox = document.getElementById('rag_mc');
+    const existing = currentMcBox.value.split(',').map(x => x.trim()).filter(Boolean);
+    const finalSet = new Set([...existing, ...entities]);
+    currentMcBox.value = Array.from(finalSet).join(', ');
+
+    alert(`Succès ! ${entities.size} entités ou combinaisons identifiées et ajoutées à la liste. N'oubliez pas de sauvegarder.`);
+
+  } catch (err) {
+    console.error(err);
+    alert("Erreur de lecture CSV : " + err.message);
+  } finally {
+    btnIcon.innerText = oldIcon;
+    e.target.value = '';
+  }
+};
+
 window.saveApiKeys = async () => {
   const keyMamouth = document.getElementById('api_key_mamouth').value;
   const keyPro = document.getElementById('api_key_pro').value;
@@ -1003,6 +1152,47 @@ window.copyFinalRagResult = () => {
   alert("Résultat copié !");
 };
 
+window.handleRagSelection = (e) => {
+   const textarea = e.target;
+   const start = textarea.selectionStart;
+   const end = textarea.selectionEnd;
+   if (start !== end) {
+       const selectedText = textarea.value.substring(start, end).trim();
+       if (selectedText.length > 2) {
+           window._ragSelectionTemp = selectedText;
+           const popup = document.getElementById('rag_selection_popup');
+           popup.style.display = 'block';
+       }
+   }
+};
+
+window.addSelectionToRag = () => {
+   if (!window._ragSelectionTemp) return;
+   const sel = window._ragSelectionTemp;
+   
+   const currentMcBox = document.getElementById('rag_mc');
+   const existing = currentMcBox.value.split(',').map(x => x.trim()).filter(Boolean);
+   if (!existing.includes(sel)) {
+       existing.push(sel);
+       currentMcBox.value = existing.join(', ');
+       // Auto-save setting
+       if (state.user && state.user.id) {
+           localStorage.setItem('rag_pc', document.getElementById('rag_pc').value);
+           localStorage.setItem('rag_mc', currentMcBox.value);
+           supabaseClient.from('profiles').update({ personal_context: document.getElementById('rag_pc').value }).eq('id', state.user.id);
+       }
+   }
+   
+   window.closeRagSelectionPopup();
+   alert(`"${sel}" a été ajouté aux entités obligatoires à masquer. Veuillez relancer la "Génération du Prompt".`);
+};
+
+window.closeRagSelectionPopup = () => {
+   const popup = document.getElementById('rag_selection_popup');
+   if (popup) popup.style.display = 'none';
+   window._ragSelectionTemp = null;
+};
+
 window.generateRagPrompt = async () => {
   const promptText = document.getElementById('rag_prompt').value;
   if (!promptText) return alert("Veuillez entrer une consigne (prompt) pour l'IA.");
@@ -1080,24 +1270,46 @@ window.deanonymiseRag = () => {
 window.pseudonymiseText = async (text, mandatoryEntities) => {
   let map = {};
 
-  const getFakeFor = (realStr, type) => {
+  const getFakeFor = (realStr, type, forcedFake = null) => {
     if (!realStr || realStr.length < 2) return realStr;
     if (map[realStr]) return map[realStr];
+    
+    if (forcedFake) {
+       map[realStr] = forcedFake;
+       return forcedFake;
+    }
+
     let fake = "";
     if (type === 'Person') fake = window.faker.person.fullName();
     else if (type === 'Place') fake = window.faker.location.city();
     else if (type === 'Organization') fake = window.faker.company.name();
     else if (type === 'Email') fake = window.faker.internet.email();
-    else if (type === 'Phone') mask = "06" + Math.floor(10000000 + Math.random() * 90000000); // Faker phone sometimes weird in FR format
-    else fake = window.faker.word.noun();
+    else if (type === 'Phone') {
+        const randPhone = "06" + Math.floor(10000000 + Math.random() * 90000000);
+        fake = randPhone;
+    } else fake = window.faker.word.noun();
 
-    if (!fake && type === 'Phone') fake = "06" + Math.floor(10000000 + Math.random() * 90000000);
     map[realStr] = fake;
     return fake;
   };
 
-  // 1. Mandatory Entités
-  mandatoryEntities.forEach(ent => getFakeFor(ent, 'Organization'));
+  // 1. Mandatory Entités (Reverse engineering multi-words for double-sided matching)
+  mandatoryEntities.forEach(ent => {
+    const fake = getFakeFor(ent, 'Person'); // Use person as default for mandatory to have clean names
+    const parts = ent.split(/[\s-]/).filter(Boolean);
+    if (parts.length === 2) {
+       // Si 2 parties, génère aussi l'inverse (ex: "DUPONT Jean" pour "Jean DUPONT")
+       const reverseReal = parts[1] + ' ' + parts[0];
+       // On assigne le MÊME fake pour l'inverse !
+       const fakeParts = fake.split(/\s/);
+       if (fakeParts.length >= 2) {
+           const reverseFake = fakeParts[1] + ' ' + fakeParts[0];
+           getFakeFor(reverseReal, 'Person', reverseFake);
+       } else {
+           getFakeFor(reverseReal, 'Person', fake);
+       }
+    }
+  });
 
   // 2. Extract with Regex (Emails & Phones FR)
   const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi;
@@ -1123,10 +1335,11 @@ window.pseudonymiseText = async (text, mandatoryEntities) => {
   sortedKeys.forEach(real => {
     const fake = map[real];
     const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`\\b${escapeRegExp(real)}\\b`, 'g'); // Mots entiers si possible
-    // Fallback on simple replace globally if word boundary misses due to accents
+    const regex = new RegExp(`\\b${escapeRegExp(real)}\\b`, 'g'); // Mots entiers
     newText = newText.replace(regex, fake);
-    newText = newText.split(real).join(fake); // brut force replace for accents and punctuation weirdness
+    // Remove split-join fallback which can cause horrible corruptions on partially matched strings,
+    // regex \b handles words properly. If it fails, users can use forced csv lists.
+    // If we wanted to keep split/join we would only do it for pure punctuation-less strings
   });
 
   return { text: newText, map: map };
