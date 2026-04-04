@@ -1,5 +1,81 @@
 // --- OPTIONS VIEW ---
 window.renderOptionsView = () => {
+  // Liste des Rôles et des Permissions pour la Matrice RBAC
+  const rolesDisplay = [
+      { id: 'maire', label: 'Maire' },
+      { id: 'adjoint', label: 'Adjoint' },
+      { id: 'delegue', label: 'Délégué' },
+      { id: 'technicien', label: 'Technicien' },
+      { id: 'elu', label: 'Élu (Base)' }
+  ];
+  
+  const permissionsList = [
+      { id: 'manage_themes', label: 'Gérer les thèmes', def: r => ['maire'].includes(r) },
+      { id: 'manage_subjects', label: 'Gérer les sujets', def: r => ['maire'].includes(r) },
+      { id: 'see_confidential', label: 'Voir sujets confidentiels', def: r => r !== 'technicien' },
+      { id: 'vote_active', label: 'Droit de voter', def: r => r !== 'technicien' },
+      { id: 'manage_users', label: 'Gérer les comptes utilisateurs', def: r => ['maire'].includes(r) },
+      { id: 'manage_councils', label: 'Gérer les conseils', def: r => ['maire', 'adjoint', 'delegue'].includes(r) },
+      { id: 'add_to_agenda', label: "Ajouter à l'ODJ", def: r => ['maire'].includes(r) }
+  ];
+
+  const canEditRbac = state.user && (state.user.role === 'admin' || state.user.role === 'superadmin');
+  
+  let rbacHtml = '';
+  if (canEditRbac) {
+      // Pour le SuperAdmin, permettre de choisir la collectivité (simulé par un input texte ou s'il a usurpé le state)
+      // On utilisera la collectivite courante du state, que le superadmin peut changer via l'UI s'il le souhaite.
+      const currentTarget = state.user.role === 'superadmin' && !state.user.collectivite_id 
+                            ? '<div style="margin-bottom:1rem; padding:1rem; background:#fffbdd; border-left:4px solid #f59e0b;">En tant que <b>SuperAdmin</b> global (sans collectivité), vous ne configurez les droits que si vous endossez l\'identité d\'une mairie.</div>' 
+                            : '';
+
+      let tableHtml = `<table style="width:100%; border-collapse:collapse; margin-top:1rem; font-size:0.9rem;">
+          <thead>
+              <tr>
+                  <th style="text-align:left; padding:0.8rem; border-bottom:2px solid #e2e8f0; color:#334155;">Capacité</th>
+                  ${rolesDisplay.map(r => `<th style="text-align:center; padding:0.8rem; border-bottom:2px solid #e2e8f0; color:#334155;">${r.label}</th>`).join('')}
+              </tr>
+          </thead>
+          <tbody>
+      `;
+      
+      permissionsList.forEach(perm => {
+          tableHtml += `<tr><td style="padding:0.8rem; border-bottom:1px solid #f1f5f9; font-weight:500;">${perm.label}</td>`;
+          rolesDisplay.forEach(roleObj => {
+              const r = roleObj.id;
+              // Evaluation de la valeur courante (custom ou par défaut)
+              let isChecked = perm.def(r);
+              if (state.customPermissions && state.customPermissions[r] && typeof state.customPermissions[r][perm.id] === 'boolean') {
+                  isChecked = state.customPermissions[r][perm.id];
+              }
+              
+              tableHtml += `
+                 <td style="text-align:center; padding:0.8rem; border-bottom:1px solid #f1f5f9;">
+                     <input type="checkbox" id="rbac_${r}_${perm.id}" ${isChecked ? 'checked' : ''} style="width:1.2rem; height:1.2rem; cursor:pointer;" onchange="markRbacDirty()">
+                 </td>
+              `;
+          });
+          tableHtml += `</tr>`;
+      });
+      tableHtml += `</tbody></table>`;
+
+      rbacHtml = `
+      <div class="card" id="rbac_container_card" style="border:1px solid #e2e8f0; padding:2rem; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); transition:all 0.3s;">
+          <h3 style="margin:0 0 1rem 0; color:var(--text-main); display:flex; align-items:center; gap:0.5rem;">
+              <span class="material-icons-round" style="color:#8b5cf6;">admin_panel_settings</span> Matrice des Droits (RBAC)
+          </h3>
+          <p style="font-size:0.95rem; color:#64748b; margin-bottom:1.5rem;">Définissez finement les permissions par défaut pour chaque rôle au sein de votre collectivité.</p>
+          ${currentTarget}
+          <div style="overflow-x:auto; background:#f8fafc; border-radius:8px; border:1px solid #cbd5e1;">
+             ${tableHtml}
+          </div>
+          <div style="text-align:right; margin-top:1.5rem;">
+               <button id="btn_save_rbac" class="btn btn-primary" onclick="saveRbacMatrix()" disabled style="opacity:0.5; transition:all 0.2s;"><span class="material-icons-round">save</span> Appliquer les Droits</button>
+          </div>
+      </div>
+      `;
+  }
+
   return `
     <div class="view-header">
       <h2 style="display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round" style="color:var(--primary); font-size:2.5rem; filter:drop-shadow(0 4px 3px rgb(0 0 0 / 0.07));">settings</span>Options Système</h2>
@@ -7,6 +83,9 @@ window.renderOptionsView = () => {
     </div>
     
     <div style="display:flex; flex-direction:column; gap:2rem; max-width:800px;">
+        
+        ${rbacHtml}
+
         <div class="card" style="border:1px solid #e2e8f0; padding:2rem; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
             <h3 style="margin:0 0 1rem 0; color:var(--text-main); display:flex; align-items:center; gap:0.5rem;"><span class="material-icons-round" style="color:#0ea5e9;">vpn_key</span> Clés API Intelligence Artificielle (RAG Auto)</h3>
             <p style="font-size:0.95rem; color:#64748b; margin-bottom:1.5rem;">Ces clés vous permettent d'utiliser l'assistance automatique de rédaction. Elles sont stockées de manière sécurisée uniquement sur cet ordinateur (localStorage) et ne sont jamais transmises à nos serveurs.</p>
@@ -53,6 +132,58 @@ window.renderOptionsView = () => {
         </div>
     </div>
   `;
+};
+
+window.markRbacDirty = () => {
+    const btn = document.getElementById('btn_save_rbac');
+    const card = document.getElementById('rbac_container_card');
+    if (btn) {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+    }
+    if (card) {
+        card.style.borderColor = '#8b5cf6';
+        card.style.boxShadow = '0 0 0 3px rgba(139, 92, 246, 0.2)';
+    }
+};
+
+window.saveRbacMatrix = async () => {
+    if (!state.user || !state.user.collectivite_id) return alert("Hula ! Aucune collectivité cible n'est définie.");
+    
+    document.getElementById('btn_save_rbac').innerText = "Sauvegarde...";
+    
+    const roles = ['maire', 'adjoint', 'delegue', 'technicien', 'elu'];
+    const perms = ['manage_themes', 'manage_subjects', 'see_confidential', 'vote_active', 'manage_users', 'manage_councils', 'add_to_agenda'];
+    
+    let newConfig = {};
+    roles.forEach(r => {
+        newConfig[r] = {};
+        perms.forEach(p => {
+            const cb = document.getElementById(`rbac_${r}_${p}`);
+            if (cb) {
+                newConfig[r][p] = cb.checked;
+            }
+        });
+    });
+    
+    try {
+        const { error } = await supabaseClient.from('collectivity_roles_config').upsert({
+            collectivite_id: state.user.collectivite_id,
+            permissions: newConfig,
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'collectivite_id' });
+        
+        if (error) throw error;
+        
+        state.customPermissions = newConfig;
+        alert("Permissions RBAC mises à jour avec succès !");
+        render(); // Re-render complete app pour appliquer limites partout
+        
+    } catch(err) {
+        console.error(err);
+        alert("Erreur réseau: " + err.message);
+        document.getElementById('btn_save_rbac').innerText = "Réessayer";
+    }
 };
 
 window.saveSysRagSettings = async () => {

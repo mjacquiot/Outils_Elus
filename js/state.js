@@ -66,7 +66,8 @@ let state = {
       mamouth: localStorage.getItem('rag_api_mamouth') || '',
       pro: localStorage.getItem('rag_api_pro') || ''
     }
-  }
+  },
+  customPermissions: {}
 };
 
 // --- INITIALIZATION & SYNC ---
@@ -140,6 +141,18 @@ async function syncFromSupabase() {
     state.councils = (councils || []).map(c => ({ id: c.id, date: c.date_seance, agenda: c.agenda || [], collectivite_id: c.collectivite_id }));
     state.messages = (messages || []).map(m => ({ id: m.id, type: m.type, targetId: m.target_id, sender: m.sender, text: m.text }));
 
+    // 3. Récupération de la configuration RBAC (SuperAdmin récupère par defaut null s'il na pas de cible ou récupère le bon lors de l'override local)
+    if (targetCol) {
+       const { data: rbacData } = await supabaseClient.from('collectivity_roles_config').select('permissions').eq('collectivite_id', targetCol).single();
+       if (rbacData && rbacData.permissions) {
+           state.customPermissions = rbacData.permissions;
+       } else {
+           state.customPermissions = {};
+       }
+    } else {
+       state.customPermissions = {};
+    }
+
   } catch (err) {
     console.error("Erreur de synchro Supabase:", err);
   }
@@ -163,43 +176,79 @@ function logHistory(themeId, action, description) {
 }
 
 // --- PERMISSIONS ---
+// --- PERMISSIONS (RBAC Dynamique) ---
 const Permissions = {
   isPublic: () => !state.user,
 
-  // Maire : tout (sauf admin), Adjoint/Délégué : tout sur leurs thèmes rattachés.
+  // Fonction utilitaire pour lire la matrice dynamique :
+  // Retourne la règle personnalisée OU la règle par défaut si non spécifié.
+  _check: (capability, u, fallback) => {
+      // Les Admins et SuperAdmins conservent toujours les droits par précaution s'il s'agit d'une fonction d'admin
+      if (u.role === ROLES.SUPERADMIN) return true;
+      if (u.role === ROLES.ADMIN && capability === 'manage_users') return true; 
+
+      if (state.customPermissions && state.customPermissions[u.role] && typeof state.customPermissions[u.role][capability] === 'boolean') {
+          return state.customPermissions[u.role][capability];
+      }
+      return fallback;
+  },
+
   canManageTheme: (t, u) => {
     if (!u) return false;
-    if (u.role === ROLES.SUPERADMIN || u.role === ROLES.ADMIN || u.role === ROLES.MAIRE) return true;
-    if (u.role === ROLES.TECHNICIEN || u.role === ROLES.ELU) return false;
+    // Si la config globale l'autorise (ou fallback)
+    const globalGranted = Permissions._check('manage_themes', u, [ROLES.ADMIN, ROLES.MAIRE].includes(u.role));
+    if (globalGranted) return true;
+    // Sinon, on accorde si le thème est spécifiquement rattaché (override positif local uniquement)
     return u.attachedThemes && u.attachedThemes.includes(t.id);
   },
 
   canManageSubject: (s, u) => {
     if (!u) return false;
-    if (u.role === ROLES.SUPERADMIN || u.role === ROLES.ADMIN || u.role === ROLES.MAIRE) return true;
-    if (u.role === ROLES.TECHNICIEN || u.role === ROLES.ELU) return false;
+    const globalGranted = Permissions._check('manage_subjects', u, [ROLES.ADMIN, ROLES.MAIRE].includes(u.role));
+    if (globalGranted) return true;
     return u.attachedThemes && u.attachedThemes.includes(s.themeId);
   },
 
   canSeeSubject: (s, u) => {
     if (!u) return false;
-    if (u.role === ROLES.SUPERADMIN || u.role === ROLES.ADMIN || u.role === ROLES.MAIRE) return true;
-    // Technicien ne voit pas si confidentiel
-    if (u.role === ROLES.TECHNICIEN && s.isConfidential) return false;
-    return true;
+    if (s.isConfidential) {
+        return Permissions._check('see_confidential', u, u.role !== ROLES.TECHNICIEN);
+    }
+    return true; // Tous le monde voit les non-confidentiels de base
   },
 
   canVote: (s, u) => {
     if (!u) return false;
-    if (u.role === ROLES.SUPERADMIN) return true;
-    if (s.vote && s.vote.target === 'elu' && u.role !== ROLES.TECHNICIEN) return true;
+    if (s.vote && s.vote.target === 'elu') {
+       return Permissions._check('vote_active', u, u.role !== ROLES.TECHNICIEN);
+    }
     return false;
   },
 
-  canManageUsers: (u) => u && (u.role === ROLES.SUPERADMIN || u.role === ROLES.ADMIN || u.role === ROLES.MAIRE),
-  canAttachThemes: (u) => u && (u.role === ROLES.SUPERADMIN || u.role === ROLES.ADMIN || u.role === ROLES.MAIRE),
+  canManageUsers: (u) => {
+    if (!u) return false;
+    return Permissions._check('manage_users', u, [ROLES.ADMIN, ROLES.MAIRE].includes(u.role));
+  },
 
-  canManageCouncil: (u) => u && [ROLES.SUPERADMIN, ROLES.ADMIN, ROLES.MAIRE, ROLES.ADJOINT, ROLES.DELEGUE].includes(u.role),
-  canAddToAgenda: (s, u) => u && ([ROLES.SUPERADMIN, ROLES.ADMIN, ROLES.MAIRE].includes(u.role) || ([ROLES.ADJOINT, ROLES.DELEGUE].includes(u.role) && u.attachedThemes.includes(s.themeId)))
+  canAttachThemes: (u) => {
+    if (!u) return false;
+    return Permissions._check('manage_users', u, [ROLES.ADMIN, ROLES.MAIRE].includes(u.role));
+  },
+
+  canManageCouncil: (u) => {
+    if (!u) return false;
+    return Permissions._check('manage_councils', u, [ROLES.ADMIN, ROLES.MAIRE, ROLES.ADJOINT, ROLES.DELEGUE].includes(u.role));
+  },
+
+  canAddToAgenda: (s, u) => {
+    if (!u) return false;
+    const globalGranted = Permissions._check('add_to_agenda', u, [ROLES.ADMIN, ROLES.MAIRE].includes(u.role));
+    if (globalGranted) return true;
+    // Ajout si spécifiquement rattaché
+    if ([ROLES.ADJOINT, ROLES.DELEGUE].includes(u.role)) {
+         return u.attachedThemes && u.attachedThemes.includes(s.themeId);
+    }
+    return false;
+  }
 };
 
