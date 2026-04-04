@@ -57,6 +57,8 @@ let state = {
   aiChatViewMode: 'clear',
   uiFilterUsers: null,
   pendingRegistrations: [],
+  localDict: {},          // Dictionnaire de pseudonymisation local
+  aiWorker: null,         // Référence au Web Worker Transformers.js
   apiConfig: {
     active: localStorage.getItem('rag_api_active') || 'none',
     keys: {

@@ -38,13 +38,15 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';</script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://unpkg.com/compromise"></script>
+
     <script type="module">
         import { fakerFR as faker } from 'https://esm.sh/@faker-js/faker';
         window.faker = faker;
     </script>
+    <script src="js/crypto_utils.js"></script>
     <script src="js/state.js"></script>
     <script src="js/views_app.js"></script>
+    <script src="js/actions/crypto_init.js"></script>
     <script src="js/actions/auth_actions.js"></script>
     <script src="js/actions/theme_actions.js"></script>
     <script src="js/actions/doc_actions.js"></script>

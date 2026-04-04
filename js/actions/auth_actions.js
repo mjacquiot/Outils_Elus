@@ -26,6 +26,13 @@ window.handleLogin = async (e) => {
     } else {
       state.user = { id: data.user.id, email: data.user.email, username: data.user.email.split('@')[0], role: ROLES.ELU, attachedThemes: [] };
       await syncFromSupabase();
+      
+      // --- ZERO-KNOWLEDGE INIT ---
+      if (window.initCryptoSession) {
+          await window.initCryptoSession(passV);
+          window.checkAndLaunchOnboarding();
+      }
+
       state.currentView = 'dashboard';
       render();
     }
